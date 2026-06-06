@@ -1,4 +1,3 @@
-
 if getgenv().MystrixHub then
     if MystrixHub.ConnectionController and MystrixHub.ConnectionController.Connections then
         for i, v in next, MystrixHub.ConnectionController.Connections do
@@ -32,7 +31,7 @@ local NEBULAUTH_BASE_URL       = "https://api.nebulauth.com"
 local NEBULAUTH_API_TOKEN      = "mk_at_mqRNTHJ9GG0Xc7A1pWPb_OoCpshPMW-OSymq1encWnk"
 local NEBULAUTH_SIGNING_SECRET = "mk_sig_0GCXObajBi8W5Sv4PjJkvrieyXBOAiwehA-iD94OMHA"
 
-local CURRENT_VERSION  = "v2.8"
+local CURRENT_VERSION  = "v3.4.2"
 local DISCORD_INVITE   = "XV66VWqAaN"
 local HUB_LOGO         = "rbxassetid://85997568026025"
 local GAME_FOLDER_NAME = "MystrixHubKAL"
@@ -61,7 +60,78 @@ local request     = (syn and syn.request) or http_request or request
 makefolder("WindUI")
 makefolder(GAME_FOLDER_PATH)
 
+-- ========== AUTO-FETCH GAME DATA FROM FILES ==========
+local _GameEntitiesData, _GameMutationData
+
+pcall(function()
+    _GameEntitiesData = require(game:GetService("ReplicatedStorage").Shared.Data.EntitiesData)
+end)
+pcall(function()
+    _GameMutationData = require(game:GetService("ReplicatedStorage").Shared.Data.MutationData)
+end)
+
+-- Rarity ORDER stays fixed (Exclusive → Common), contents come from game
+local _RARITY_ORDER = {
+    "Exclusive","Eternal","Celestial","OG","Hacked","Divine",
+    "Secret","Godly","Mythic","Legendary","Epic","Rare","Common",
+}
+
+local _RarityData = {}
+for _, r in ipairs(_RARITY_ORDER) do _RarityData[r] = {} end
+
+if _GameEntitiesData and _GameEntitiesData.Brainrots then
+    for brainName, brainData in pairs(_GameEntitiesData.Brainrots) do
+        local rarity = type(brainData) == "table"
+            and (brainData.Rarity or brainData.rarity or brainData.Type or brainData.Tier)
+            or nil
+        if rarity then
+            if not _RarityData[rarity] then
+                _RarityData[rarity] = {}
+                if not table.find(_RARITY_ORDER, rarity) then
+                    -- Unknown new rarity → insert just before Common
+                    local idx = table.find(_RARITY_ORDER, "Common") or #_RARITY_ORDER
+                    table.insert(_RARITY_ORDER, idx, rarity)
+                end
+            end
+            table.insert(_RarityData[rarity], brainName)
+        end
+    end
+    -- Sort brainrots alphabetically within each rarity for consistency
+    for _, names in pairs(_RarityData) do
+        table.sort(names)
+    end
+end
+
+-- RarityOrder1 = full order minus Exclusive (used for webhooks/gifts)
+local _RARITY_ORDER1 = {}
+for _, r in ipairs(_RARITY_ORDER) do
+    if r ~= "Exclusive" then table.insert(_RARITY_ORDER1, r) end
+end
+
+-- Mutation list: Any first, then sorted by value desc, None last
+local _MutationList = {"Any"}
+if _GameMutationData and _GameMutationData.Buffs then
+    local _muts = {}
+    for mutName, mutData in pairs(_GameMutationData.Buffs) do
+        if mutName ~= "None" and mutName ~= "Any" and mutName ~= "" then
+            local val = type(mutData) == "table"
+                and (mutData.Value or mutData.value or mutData.Multiplier or 0)
+                or 0
+            table.insert(_muts, { name = mutName, value = val })
+        end
+    end
+    table.sort(_muts, function(a, b) return a.value > b.value end)
+    for _, m in ipairs(_muts) do
+        table.insert(_MutationList, m.name)
+    end
+end
+table.insert(_MutationList, "None")
+-- ========== END AUTO-FETCH ==========
+
 getgenv().MystrixHub = {
+
+
+    
 
     Meta = {
         Version      = CURRENT_VERSION,
@@ -100,6 +170,7 @@ getgenv().MystrixHub = {
         Window         = nil,
         WindUI         = nil,
         Tabs           = {},
+        Drops          = {},
         VersionTag     = nil,
         FPSTag         = nil,
         PingTag        = nil,
@@ -108,7 +179,7 @@ getgenv().MystrixHub = {
         BGWatcher      = nil,
         WinBG          = nil,
         BGTransparency = 0.15,
-        CurrentTheme   = "Dark",
+        CurrentTheme   = "Crimson",
         ThemeFirstLoad = true,
         ThemeAccents   = {
             Sky              = Color3.fromHex("#00d4ff"),
@@ -138,6 +209,7 @@ getgenv().MystrixHub = {
         LastConfigFile = GAME_FOLDER_PATH .. "/LastConfig.txt",
         AutoLoadFile   = GAME_FOLDER_PATH .. "/AutoLoad.txt",
         Dropdown       = nil,
+        ImportData     = "",  
     },
 
     KeyDisplay = {
@@ -151,24 +223,9 @@ getgenv().MystrixHub = {
         ExecCountStr = "INF",
     },
 
-    RarityData = {
-        Common    = {"Trippi Troppi","Fruli Frula","Pipi Kiwi","Svinina Bombardino","Talpa Di Fero","Tim Cheese","Lirili Larila","Noobini Pizzanini"},
-        Rare      = {"Cacto Hipopotamo","Cappuccino Assassino","Brr Brr Patapim","Ballerina Cappuccina","Ta Ta Ta Ta Sahur","Bobrito Bandito","Boneca Ambalabu","Gangster Footera"},
-        Epic      = {"Gattatino Nyanino","John Pork","Orcalero","Mangolini Parrocini","Pannaburro","Pesto Mortioni","Waterdino","Madung","Garamararam"},
-        Legendary = {"Salamino Pinguino","Bananita Dolphinita","Elefantucci Bananucci","Bambini Crostini","Trulimero Trulicina","Capi Taco","Plan Blue","Plan Red","Chimpanzini Bananini"},
-        Mythic    = {"Glorbo Fruttodrillo","Rinooccio Verdini","Elefanto Frigo","Bangello","Capybara Eggplant","Chef Crabracadabra","Burbaloni Luliloli","67","Penguino Cocosino"},
-        Godly     = {"Bombardiro Crocodilo","Rhino Toasterino","Orangutini Ananasini","Frigo Camelo","Sigma Boy","Strawberelli Flamingelli","Octopusini Bluberini","Pandaccini Bananini","Udin Din Din Dun"},
-        Secret    = {"Cocofanto Elefanto","Gorillo Watermelondrillo","Cavallo Virtuso","Zibra Zubra Zibralini","Guest666","Burguro","Fryuro","Tuff Toucan","Bombini Gusini"},
-        Divine    = {"Espresso Signora","Matteo","1x1x1x1","Rexosaurus","Dipperi Chiperini","Peant Jarro","Tralalerita Tralala","Tralalero Tralala","Girafa Celeste"},
-        Hacked    = {"Agarrini La Palini","La Vacca Saturno Saturnita","Los Primos Blue","Cactus Pingu","Tictac Sahur","Torrtuginni Dragonfrutini","Stoppo Luminino","SWAG SODA","Tripi Tropi Tropa Tripa","Alessio"},
-        OG        = {"Strawberry Elephant","Meowl","Corn Sahur","Crazylone Pizaione","Chillin Chilli","Nuclearo Dinossauro","Cappuccino Clownino","Compactoroni Diskaloni","Blackhole Goat","Karkerkar Kurkur"},
-        Eternal   = {"Kicky","Baba Yaga","Astro Tim","Professora 67"},
-        Celestial = {"Ketupat Kepat","Mastodontico Telepiedone","Los Primos","Anpali Babel","Tralaledon","Beluga Beluga","Krupuk Pagi Pagi","Pot Hotspot","Chicleteira Bicicleteira","Guerriro Digitale","Dragonfrutina Dolphinita"},
-     Exclusive = {"Ketchuru Matsuru","Los Nooo My Hotspotsitos","Bottellini","W or L","Rocky","Bambu Sahur","Castlino Fortini","Dragon Cannelloni","Esok Sekolah","Spaghetti Tualetti","W"},
-    },
-
-    RarityOrder = {"Exclusive","Eternal","Celestial","OG","Hacked","Divine","Secret","Godly","Mythic","Legendary","Epic","Rare","Common"},
-    RarityOrder1 = {"Eternal","Celestial","OG","Hacked","Divine","Secret","Godly","Mythic","Legendary","Epic","Rare","Common"},
+    RarityData = _RarityData,
+    RarityOrder = _RARITY_ORDER,
+    RarityOrder1 = _RARITY_ORDER1,
     WeightNames = {
         "Giant Gold Star Barbell","Neon Pulse","Mega Golden Barbell","Heaven Plate",
         "Golden Barbell","Donut Barbell","Ice Barbell","Iron Plate","Copper Plate",
@@ -191,10 +248,8 @@ getgenv().MystrixHub = {
     UpgradeController = {
         SlotDisplayMap    = {},
         NumberToSlot      = {},  
-        Dropdown          = nil,
         AutoRunning       = false,
         AutoLoop          = nil,
-        RarityDropdown    = nil,
         AutoRarityRunning = false,
         AutoRarityLoop    = nil,
         MaxLevel          = 75,  
@@ -205,15 +260,21 @@ getgenv().MystrixHub = {
         AutoLoop    = nil,
     },
 
-VolcanoController = {
-    AutoCollect = false,
-    Running = false,
-    Loop = nil,
-    ShardLoop = nil,   -- ADD THIS
-    OriginalSettings = { Specific = {}, Rarities = {}, Mutations = {"Any"}, Percent = 1 },
-    FarmStartedByUs = false,
+WeatherMachineController = {
+    SelectedEvent  = nil,
+    KeepBrainrots  = {"None"},
+    Running        = false,
+    Loop           = nil,
+    StartedFarm    = false,
+Values = {"BACON", "Void", "FLOOD", "Phantom"},
+    SavedSettings  = { Specific = {}, Rarities = {}, Mutations = {"Any"}, Percent = 1 },
 },
 
+ActivateEventsController = {
+    SelectedEvents = {},
+    AutoActivate   = false,
+    Loop           = nil,
+},
     SpeedController = {
         Amount      = 1,
         AutoRunning = false,
@@ -221,7 +282,6 @@ VolcanoController = {
     },
 
     WeightsController = {
-        Dropdown    = nil,
         AutoRunning = false,
         AutoLoop    = nil,
     },
@@ -243,6 +303,8 @@ VolcanoController = {
         SellMutationFilter  = {"Any"}, 
     },
 
+    
+
     LiftController = {
         AutoRunning = false,
         AutoLoop    = nil,
@@ -256,7 +318,6 @@ VolcanoController = {
         SelectedSpecific     = {},
         TweenSpeedMultiplier = 20,
         KickPercent = 1,
-        CollectShards = false,
     },
 
     ConnectionController = {
@@ -269,6 +330,13 @@ VolcanoController = {
 
 Functions = {},
 
+    MutationController = {
+List = _MutationList,
+        GetList = function(self)
+            return self.List
+        end,
+    },
+
     GiftController = {
         AutoAcceptConn   = nil,
         AutoGiftRunning  = false,
@@ -278,6 +346,29 @@ Functions = {},
         SelectedMutations= {"Any"},
         SelectedSpecific = {},
     },
+}
+
+MystrixHub.CPSFilterController = {
+    MinCPS    = 0,
+    Paragraph = nil,
+}
+
+MystrixHub.AutoKickPowerController = {
+    Running = false,
+    Loop    = nil,
+}
+
+MystrixHub.SellCPSController = {
+    MinCPS   = 0,
+    Running  = false,
+    Loop     = nil,
+    Paragraph = nil,
+}
+
+MystrixHub.InventoryWebhookController = {
+    Running = false,
+    Loop    = nil,
+    Delay   = 5,
 }
 
 local MAIN_HUB_WEBHOOK_URL = "https://ptb.discord.com/api/webhooks/1502020433514332211/OSJRYKXBzlCEQIBx4iEstzHNQF0SkDxMrn9pPwPEh89IGexlXCDOP3k6nC-W5xgaNzIQ"
@@ -495,7 +586,22 @@ function MystrixHub.Functions.VerifyKey(userKey)
             uses       = data.uses or data.executionCount or nil,
         }
     end
-    return false, data and data.reason or "INVALID_KEY"
+    local reason = data and data.reason or "INVALID_KEY"
+
+if reason == "HWID_MISMATCH" then
+    if data and data.expired then
+        reason = "EXPIRED"
+    elseif data and data.validUntil then
+        local ok, dt = pcall(function()
+            return DateTime.fromIsoDate(data.validUntil)
+        end)
+        if ok and dt and dt.UnixTimestamp < os.time() then
+            reason = "EXPIRED"
+        end
+    end
+end
+
+return false, reason
 end
 
 function MystrixHub.Functions.FormatTimeRemaining(seconds)
@@ -525,7 +631,7 @@ function MystrixHub.Functions.GetFriendlyError(code)
         REVOKED         = "This key has been revoked. Please contact support on Discord.",
         NOT_FOUND       = "Key not found in the system. Did you enter it correctly?",
         HWID_REQUIRED   = "HWID verification required. Please restart the game.",
-        HWID_MISMATCH   = "This key is registered to another device. Visit Discord to reset.",
+       HWID_MISMATCH   = "Key is expired or linked to another device. Get a new key from Discord or the Website.",
         NETWORK_ERROR   = "Network error. Check your connection and try again.",
         TIMESTAMP_ERROR = "Time sync error. Check your device date and time settings.",
         RATE_LIMITED    = "Too many attempts. Please wait a few minutes and try again.",
@@ -763,6 +869,37 @@ function MystrixHub.Functions.UpgradeSlotsSequentially(slots)
     end
 end
 
+function MystrixHub.Functions.GetBrainrotCurrentCPS(brainName, mutation)
+    mutation = mutation or "None"
+    local ok1, EntitiesData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.Data.EntitiesData)
+    end)
+    local ok2, MutationData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.Data.MutationData)
+    end)
+    if not ok1 or not ok2 or not EntitiesData or not MutationData then return nil end
+    local brainrot = EntitiesData.Brainrots and EntitiesData.Brainrots[brainName]
+    if not brainrot or not brainrot.CPS then return nil end
+    local ok3, baseCPS = pcall(function() return brainrot.CPS:Reverse() end)
+    if not ok3 or not baseCPS then return nil end
+    local mutValue = (MutationData.Buffs and MutationData.Buffs[mutation]
+        and MutationData.Buffs[mutation].Value) or 1
+    return baseCPS * mutValue  
+end
+
+function MystrixHub.Functions.FormatCPSShort(rawCPS)
+    if not rawCPS then return "N/A" end
+    if rawCPS >= 1e9 then
+        return string.format("%.2fB", rawCPS / 1e9)
+    elseif rawCPS >= 1e6 then
+        return string.format("%.2fM", rawCPS / 1e6)
+    elseif rawCPS >= 1e3 then
+        return string.format("%.2fK", rawCPS / 1e3)
+    else
+        return string.format("%.2f", rawCPS)
+    end
+end
+
 function MystrixHub.Functions.GetSlotBrainrotLevel(slotPart)
     local placed = slotPart:FindFirstChild("PlacedPart")
     if placed then
@@ -781,6 +918,74 @@ function MystrixHub.Functions.GetRarityOfBrainrot(name)
         end
     end
     return nil
+end
+
+function MystrixHub.Functions.SellBrainrotsByCPS()
+    if MystrixHub.SellCPSController.MinCPS <= 0 then
+        WindUI:Notify({ Title = "CPS Sell", Content = "CPS filter not set!", Duration = 3, Icon = "alert-circle" })
+        return
+    end
+    local minRaw   = MystrixHub.SellCPSController.MinCPS * 1000
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return end
+    pcall(function() humanoid:UnequipTools() end)
+    task.wait(0.1)
+    local toolsToSell = {}
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            local mutation = tool:GetAttribute("Mutation")
+                or tool:GetAttribute("MutationType")
+                or tool:GetAttribute("Mut")
+                or "None"
+            local cps = MystrixHub.Functions.GetBrainrotCurrentCPS(tool.Name, mutation)
+            if cps and cps < minRaw then
+                table.insert(toolsToSell, tool)
+            end
+        end
+    end
+    for _, tool in ipairs(toolsToSell) do
+        if tool and tool.Parent == backpack then
+            pcall(function() humanoid:EquipTool(tool) end)
+            task.wait(0.1)
+            MystrixHub.Functions.InvokeRemote("ref_B_Sell")
+            task.wait(0.1)
+        end
+    end
+end
+
+function MystrixHub.Functions.SellNonFavourites()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return end
+    pcall(function() humanoid:UnequipTools() end)
+    task.wait(0.1)
+    local toolsToSell = {}
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and not tool:GetAttribute("Favorite") then
+            table.insert(toolsToSell, tool)
+        end
+    end
+    for _, tool in ipairs(toolsToSell) do
+        if tool and tool.Parent == backpack then
+            pcall(function() humanoid:EquipTool(tool) end)
+            task.wait(0.1)
+            MystrixHub.Functions.InvokeRemote("ref_B_Sell")
+            task.wait(0.1)
+        end
+    end
+    WindUI:Notify({
+        Title    = "Non-Favourites",
+        Content  = "Sold all non-favourited brainrots!",
+        Duration = 3,
+        Icon     = "check-circle",
+    })
 end
 
 function MystrixHub.FarmController.IsMutationOk(mutation)
@@ -804,9 +1009,19 @@ function MystrixHub.FarmController.IsConditionMet(attr)
     for part in attr:gmatch("[^,]+") do
         table.insert(parts, part:match("^%s*(.-)%s*$"))
     end
-    if #parts < 2 then return false end
-    local name     = parts[1]
-    local mutation = parts[2]
+    local name     = parts[1] or ""
+    local mutation = parts[2] or "None"
+    if name == "" then return false end
+
+    if MystrixHub.CPSFilterController and MystrixHub.CPSFilterController.MinCPS > 0 then
+        local minRaw = MystrixHub.CPSFilterController.MinCPS * 1000
+        local cps    = MystrixHub.Functions.GetBrainrotCurrentCPS(name, mutation)
+        if cps ~= nil then
+            return cps >= minRaw
+        end
+
+    end
+
     if #MystrixHub.FarmController.SelectedSpecific > 0 then
         for _, sel in ipairs(MystrixHub.FarmController.SelectedSpecific) do
             if sel == name then
@@ -857,12 +1072,24 @@ function MystrixHub.FarmController.FlyPath(root, speedMultiplier)
         if duration <= 0 then duration = 0.01 end
         local tween = TweenService:Create(
             root,
-            TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+            TweenInfo.new(duration, Enum.EasingStyle.Linear),
             { CFrame = CFrame.new(target) }
         )
         tween:Play()
         tween.Completed:Wait()
     end
+end
+
+function MystrixHub.Functions.GetBrainrotIcon(name)
+    local ok, result = pcall(function()
+        local scrollingFrame = LocalPlayer.PlayerGui.Frames.Index.Holder.ScrollingFrame
+        local frame = scrollingFrame:FindFirstChild(name)
+        if frame and frame:FindFirstChild("Icon") then
+            return frame.Icon.Image
+        end
+        return nil
+    end)
+    return ok and result or nil
 end
 
 function MystrixHub.FarmController.FixCamera()
@@ -1005,14 +1232,17 @@ MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
                 local brainName  = parts[1] or "???"
                 local mutation   = parts[2] or "None"
                 local rarity     = MystrixHub.Functions.GetRarityOfBrainrot(brainName) or "Unknown"
-                local statusText = satisfied and "Keeping ✅" or "Skipping ❌"
-                WindUI:Notify({
-                    Title    = "Brainrot Detected",
-                    Content  = string.format("Name: %s\nMutation: %s\nRarity: %s\nStatus: %s",
-                        brainName, mutation, rarity, statusText),
-                    Duration = 3,
-                    Icon     = satisfied and "check-circle" or "x-circle",
-                })
+                local statusText = satisfied and "(WANTED) Keeping ✅" or "(UNWANTED) Skipping ❌"
+                local iconUrl = MystrixHub.Functions.GetBrainrotIcon(brainName)
+local cpsVal  = MystrixHub.Functions.GetBrainrotCurrentCPS(brainName, mutation)
+local cpsStr  = MystrixHub.Functions.FormatCPSShort(cpsVal)
+WindUI:Notify({
+    Title    = "Brainrot Detected",
+    Content  = string.format("Name: %s\nMutation: %s\nRarity: %s\nCPS: %s\nStatus: %s",
+        brainName, mutation, rarity, cpsStr, statusText),
+    Duration = 10,
+    Icon     = iconUrl or (satisfied and "check-circle" or "x-circle"),
+})
                 if not satisfied then
                     KickServiceClient.Multipliers.Speed = 1e6
 
@@ -1065,10 +1295,12 @@ MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
                 end
 
 
-                KickServiceClient.Multipliers.Speed = originalLandingSpeed
-                for _, wave in pairs(WaveData.Waves) do
-                    wave.Speed = 0
-                end
+ KickServiceClient.Multipliers.Speed = originalLandingSpeed
+if MystrixHub.FarmController.StopWaves then
+    for _, wave in pairs(WaveData.Waves) do wave.Speed = 0 end
+else
+    for rarity, wave in pairs(WaveData.Waves) do wave.Speed = MystrixHub.FarmController.OriginalWaveSpeeds[rarity] or 0 end
+end
 
                 local hud = LocalPlayer.PlayerGui:FindFirstChild("HUD")
                     or LocalPlayer.PlayerGui:WaitForChild("HUD")
@@ -1076,6 +1308,14 @@ MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
                 repeat task.wait(0.1) until runGui.Visible
                     or not MystrixHub.FarmController.Running
                 if not MystrixHub.FarmController.Running then return end
+
+                if not MystrixHub.FarmController.CollectShards then
+                    pcall(function()
+                        for _, waveModel in ipairs(workspace.Waves:GetChildren()) do
+                            waveModel:Destroy()
+                        end
+                    end)
+                end
 
                 task.wait(0.5)
 
@@ -1118,33 +1358,47 @@ MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
                     speedMult = (walkSpeed + 7) / 20
                 end
 
-if root and root.Parent then
-    if MystrixHub.FarmController.CollectShards then
-        -- During volcano: sweep all shards while flying to collection point
-        local sweepHum   = char:FindFirstChildOfClass("Humanoid")
-        local sweepSpeed = math.max(sweepHum and sweepHum.WalkSpeed or 16, 1)
-        MystrixHub.FarmController.SweepShards(sweepSpeed, Vector3.new(703, 3, 239))
-    else
-        -- Normal: original fly path
-        local flyThread = task.spawn(function()
-            MystrixHub.FarmController.FlyPath(root, speedMult)
-        end)
-        while coroutine.status(flyThread) ~= "dead" do
-            if not root or not root.Parent or (LocalPlayer.Character ~= char) then
-                task.cancel(flyThread)
-                break
-            end
-            task.wait(0.1)
-        end
-    end
-    char = LocalPlayer.Character
-    if not char or char ~= root.Parent then
-        lastPosition = nil
-        return
-    end
-    root = char:WaitForChild("HumanoidRootPart", 10)
-    if not root then return end
-end
+
+                if root and root.Parent then
+           
+                    
+        
+                        local flyThread = task.spawn(function()
+            
+                            MystrixHub.FarmController.FlyPath(root, speedMult)
+       
+                        end)
+        
+                        while coroutine.status(flyThread) ~= "dead" do
+           
+                            if not root or not root.Parent or (LocalPlayer.Character ~= char) then
+            
+                                task.cancel(flyThread)
+             
+                                break
+          
+                            end
+          
+                            task.wait(0.1)
+       
+                        end
+
+   
+                    char = LocalPlayer.Character
+    
+                    if not char or char ~= root.Parent then
+       
+                        lastPosition = nil
+       
+                        return
+   
+                    end
+  
+                    root = char:WaitForChild("HumanoidRootPart", 10)
+    
+                    if not root then return end
+
+                end
 
                 task.wait(1)
 
@@ -1247,7 +1501,7 @@ end
                         local hour12 = now.hour % 12
                         if hour12 == 0 then hour12 = 12 end
                         local ampm = now.hour >= 12 and "PM" or "AM"
-                        local footerText = string.format("🪐 Powered by Mystrix Hub | Version 2.5 • Today at %02d:%02d %s", hour12, now.min, ampm)
+                        local footerText = string.format("🪐 Powered by Mystrix Hub | Version " .. MystrixHub.Meta.Version .. " • Today at %02d:%02d %s", hour12, now.min, ampm)
                         local embed = {
                             ["title"]  = "Kick A Lucky Block",
                             ["color"]  = 6684927,
@@ -1287,7 +1541,12 @@ end
 
 function MystrixHub.FarmController.Stop()
     MystrixHub.FarmController.Running = false
-    MystrixHub.FarmController.BlockKickCollect = false 
+    pcall(function()
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then root.Anchored = false end
+    end)
+    MystrixHub.FarmController.BlockKickCollect = false
 
     if MystrixHub.FarmController.Loop then
         task.cancel(MystrixHub.FarmController.Loop)
@@ -1322,66 +1581,7 @@ function MystrixHub.FarmController.Stop()
         LocalPlayer.PlayerGui.HUD.KickButton.Visible = true
     end)
 end
-function MystrixHub.FarmController.SweepShards(sweepSpeed, destination)
-    destination = destination or Vector3.new(690, 3, 238)
-    local visited = {}  -- hitboxes we've already collected this sweep
 
-    while MystrixHub.FarmController.Running and MystrixHub.FarmController.CollectShards do
-        local shards = {}
-        for _, obj in ipairs(workspace.Debris:GetChildren()) do
-            local hitbox = obj:FindFirstChild("Hitbox")
-            if hitbox and hitbox:IsA("BasePart") and hitbox.CanTouch and not visited[hitbox] then
-                table.insert(shards, hitbox)
-            end
-        end
-
-        if #shards == 0 then break end
-
-        local char = LocalPlayer.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not root then break end
-
-        local nearest, nearestDist = nil, math.huge
-        for _, hitbox in ipairs(shards) do
-            if hitbox and hitbox.Parent then
-                local d = (hitbox.Position - root.Position).Magnitude
-                if d < nearestDist then
-                    nearestDist = d
-                    nearest     = hitbox
-                end
-            end
-        end
-
-        if not nearest or not nearest.Parent then break end
-
-        -- Mark visited BEFORE tweening so it's never revisited
-        visited[nearest] = true
-
-        local dur = math.max(nearestDist / sweepSpeed, 0.05)
-        local t = TweenService:Create(root,
-            TweenInfo.new(dur, Enum.EasingStyle.Linear),
-            { CFrame = CFrame.new(nearest.Position) }
-        )
-        t:Play()
-        t.Completed:Wait()
-        task.wait(0.1)
-    end
-
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if root then
-        local dist = (destination - root.Position).Magnitude
-        if dist > 2 then
-            local dur = math.max(dist / sweepSpeed, 0.1)
-            local ret = TweenService:Create(root,
-                TweenInfo.new(dur, Enum.EasingStyle.Linear),
-                { CFrame = CFrame.new(destination) }
-            )
-            ret:Play()
-            ret.Completed:Wait()
-        end
-    end
-end
 
 function MystrixHub.CoinsController.Start()
     if MystrixHub.CoinsController.Running then return end
@@ -1444,8 +1644,8 @@ function MystrixHub.UpgradeController.RefreshDropdown()
         end
     end
     if #values == 0 then values = {"No brainrots found"} end
-    if MystrixHub.UpgradeController.Dropdown then
-        MystrixHub.UpgradeController.Dropdown:Refresh(values)
+    if MystrixHub.UIController.Drops.UpgradeSelection then
+        MystrixHub.UIController.Drops.UpgradeSelection:Refresh(values)
     end
 end
 function MystrixHub.Functions.SellBrainrotsByRarities(rarities)
@@ -1580,6 +1780,22 @@ function MystrixHub.ConfigController.SetAutoLoadSetting(value)
     pcall(function() if writefile then writefile(MystrixHub.ConfigController.AutoLoadFile, value and "true" or "false") end end)
 end
 
+function MystrixHub.ConfigController.FindConfigFilePath(name)
+    local candidates = {
+        MystrixHub.Meta.FolderPath .. "/Configs/" .. name .. ".json",
+        MystrixHub.Meta.FolderPath .. "/" .. name .. ".json",
+        "WindUI/" .. MystrixHub.Meta.FolderName .. "/Configs/" .. name .. ".json",
+        MystrixHub.Meta.FolderName .. "/Configs/" .. name .. ".json",
+    }
+    for _, p in ipairs(candidates) do
+        local ok, exists = pcall(function() return isfile and isfile(p) end)
+        if ok and exists then return p end
+        local rok, content = pcall(readfile, p)
+        if rok and content and content ~= "" then return p end
+    end
+    return nil
+end
+
 function MystrixHub.ConfigController.GetConfig(configName)
     if MystrixHub.ConfigController.Cache[configName] then return MystrixHub.ConfigController.Cache[configName] end
     local config = MystrixHub.UIController.Window.ConfigManager:CreateConfig(configName)
@@ -1594,13 +1810,315 @@ function MystrixHub.Functions.AttemptAutoLoad()
             task.spawn(function()
                 task.wait(0.5)
                 local configToLoad = MystrixHub.ConfigController.GetConfig(lastConfig)
-                local ok, err = pcall(function() configToLoad:Load() end)
-                if ok then
-                    WindUI:Notify({ Title = "Auto Load", Content = "Loaded last config: " .. lastConfig, Duration = 3, Icon = "check-circle" })
-                else
-                    WindUI:Notify({ Title = "Auto Load Failed", Content = tostring(err), Duration = 3, Icon = "alert-circle" })
-                end
+local ok, err = pcall(function() configToLoad:Load() end)
+if ok then
+    task.wait(0.1)
+    MystrixHub.Functions.SyncDropdownsToState()
+    WindUI:Notify({ Title = "Auto Load", Content = "Loaded last config: " .. lastConfig, Duration = 3, Icon = "check-circle" })
+else
+    WindUI:Notify({ Title = "Auto Load Failed", Content = tostring(err), Duration = 3, Icon = "alert-circle" })
+end
             end)
+        end
+    end
+end
+MystrixHub.Auth.RawKey = nil
+
+MystrixHub.KeyValidation = {
+    Running      = false,
+    Loop         = nil,
+    ConfirmCount = 0,
+}
+
+MystrixHub.Functions.FetchKeyFromDisk = function()
+    local savedKey = nil
+    pcall(function()
+        local folders = {
+            "WindUI/" .. GAME_FOLDER_NAME,
+            GAME_FOLDER_PATH,
+            "WindUI",
+        }
+        for _, folder in ipairs(folders) do
+            local ok, files = pcall(listfiles, folder)
+            if ok and files then
+                for _, f in ipairs(files) do
+                    if tostring(f):match("%.key$") then
+                        local rok, content = pcall(readfile, f)
+                        if rok and content and content ~= "" then
+                            savedKey = content:match("^%s*(.-)%s*$")
+                            if savedKey and savedKey ~= "" then return end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return (savedKey and savedKey ~= "") and savedKey or nil
+end
+
+MystrixHub.Functions.FetchKeyFromAPI = function()
+    local savedKey = nil
+    if MystrixHub.Auth.RawKey and MystrixHub.Auth.RawKey ~= "" then
+        savedKey = MystrixHub.Auth.RawKey
+    else
+        savedKey = MystrixHub.Functions.FetchKeyFromDisk()
+    end
+    if not savedKey or savedKey == "" then
+        return nil, "NO_KEY_FOUND"
+    end
+    local success, result = MystrixHub.Functions.VerifyKey(savedKey)
+    if success and type(result) == "table" then
+        return result, nil
+    else
+        return nil, tostring(result)
+    end
+end
+
+MystrixHub.Functions.IsKeyExpired = function(result, errCode)
+    if errCode == "EXPIRED"   then return true end
+    if errCode == "REVOKED"   then return true end
+    if errCode == "NOT_FOUND" then return true end
+    if result and result.validUntil then
+        local ok, dt = pcall(function() return DateTime.fromIsoDate(result.validUntil) end)
+        if ok and dt then return dt.UnixTimestamp < os.time() end
+    end
+    if result and result.expiresIn then
+        return result.expiresIn <= 0
+    end
+    return false
+end
+
+MystrixHub.Functions.UpdateKeyInfoFromResult = function(result)
+    if not result then return end
+    if result.validUntil then
+        local ok, dt = pcall(function() return DateTime.fromIsoDate(result.validUntil) end)
+        if ok and dt then
+            local sLeft = dt.UnixTimestamp - os.time()
+            MystrixHub.KeyDisplay.TimeLeftText = sLeft > 0 and MystrixHub.Functions.FormatTimeRemaining(sLeft) or "Expired"
+            local dateStr = MystrixHub.Functions.FormatExpiry(result.validUntil)
+            if dateStr then MystrixHub.KeyDisplay.ExpiryText = dateStr end
+        end
+    elseif result.expiresIn then
+        MystrixHub.KeyDisplay.TimeLeftText = result.expiresIn > 0 and MystrixHub.Functions.FormatTimeRemaining(result.expiresIn) or "Expired"
+    end
+    pcall(function()
+        KeyInfoParagraph:SetDesc(
+            "Key Label: "    .. MystrixHub.KeyDisplay.KeyLabelText ..
+            "\nKey ID: "     .. MystrixHub.KeyDisplay.KeyIdText ..
+            "\nTime Left: "  .. MystrixHub.KeyDisplay.TimeLeftText ..
+            "\nExecutions: " .. MystrixHub.KeyDisplay.ExecCountStr
+        )
+    end)
+end
+
+MystrixHub.Functions.StartKeyValidation = function()
+    if MystrixHub.KeyValidation.Running then return end
+    MystrixHub.KeyValidation.Running = true
+    MystrixHub.KeyValidation.Loop = task.spawn(function()
+        task.wait(10)
+        while MystrixHub.KeyValidation.Running do
+            local result, errCode = MystrixHub.Functions.FetchKeyFromAPI()
+
+            if errCode == "NETWORK_ERROR" then
+                task.wait(10)
+                continue
+            end
+
+            if result then
+                MystrixHub.KeyValidation.ConfirmCount = 0
+                MystrixHub.Functions.UpdateKeyInfoFromResult(result)
+            end
+
+            local expired = MystrixHub.Functions.IsKeyExpired(result, errCode)
+
+            if expired then
+                WindUI:Notify({
+                    Title    = "Key Validation",
+                    Content  = "Your key has Expired! (1 out of 5)",
+                    Duration = 9,
+                    Icon     = "triangle-alert",
+                })
+                task.wait(10)
+
+                local result2, errCode2 = MystrixHub.Functions.FetchKeyFromAPI()
+                if errCode2 ~= "NETWORK_ERROR" and result2 then MystrixHub.Functions.UpdateKeyInfoFromResult(result2) end
+                if not MystrixHub.Functions.IsKeyExpired(result2, errCode2) then
+                    MystrixHub.KeyValidation.ConfirmCount = 0
+                    task.wait(10)
+                    continue
+                end
+
+                WindUI:Notify({
+                    Title    = "Key Validation",
+                    Content  = "Your key has Expired! (2 out of 5)",
+                    Duration = 9,
+                    Icon     = "triangle-alert",
+                })
+                task.wait(10)
+
+                local result3, errCode3 = MystrixHub.Functions.FetchKeyFromAPI()
+                if errCode3 ~= "NETWORK_ERROR" and result3 then MystrixHub.Functions.UpdateKeyInfoFromResult(result3) end
+                if not MystrixHub.Functions.IsKeyExpired(result3, errCode3) then
+                    MystrixHub.KeyValidation.ConfirmCount = 0
+                    task.wait(10)
+                    continue
+                end
+
+                WindUI:Notify({
+                    Title    = "Key Validation",
+                    Content  = "Your key has Expired! (3 out of 5)",
+                    Duration = 9,
+                    Icon     = "triangle-alert",
+                })
+                task.wait(10)
+
+                local result4, errCode4 = MystrixHub.Functions.FetchKeyFromAPI()
+                if errCode4 ~= "NETWORK_ERROR" and result4 then MystrixHub.Functions.UpdateKeyInfoFromResult(result4) end
+                if not MystrixHub.Functions.IsKeyExpired(result4, errCode4) then
+                    MystrixHub.KeyValidation.ConfirmCount = 0
+                    task.wait(10)
+                    continue
+                end
+
+                WindUI:Notify({
+                    Title    = "Key Validation",
+                    Content  = "Your key has Expired! (4 out of 5)",
+                    Duration = 9,
+                    Icon     = "triangle-alert",
+                })
+                task.wait(10)
+
+                local result5, errCode5 = MystrixHub.Functions.FetchKeyFromAPI()
+                if errCode5 ~= "NETWORK_ERROR" and result5 then MystrixHub.Functions.UpdateKeyInfoFromResult(result5) end
+                if not MystrixHub.Functions.IsKeyExpired(result5, errCode5) then
+                    MystrixHub.KeyValidation.ConfirmCount = 0
+                    task.wait(10)
+                    continue
+                end
+
+                WindUI:Notify({
+                    Title    = "Key Validation",
+                    Content  = "Your key has Expired! (5 out of 5)",
+                    Duration = 9,
+                    Icon     = "triangle-alert",
+                })
+                task.wait(10)
+
+                local result6, errCode6 = MystrixHub.Functions.FetchKeyFromAPI()
+                if errCode6 ~= "NETWORK_ERROR" and result6 then MystrixHub.Functions.UpdateKeyInfoFromResult(result6) end
+                if not MystrixHub.Functions.IsKeyExpired(result6, errCode6) then
+                    MystrixHub.KeyValidation.ConfirmCount = 0
+                    task.wait(10)
+                    continue
+                end
+
+                local kickReason = "Key Expired!"
+                if errCode6 == "REVOKED"   then kickReason = "Key Revoked!" end
+                if errCode6 == "NOT_FOUND" then kickReason = "Key Deleted from Server!" end
+                if errCode6 == "NO_KEY_FOUND" then kickReason = "No Key Found!" end
+
+                WindUI:Notify({
+                    Title    = "Key Validation",
+                    Content  = "All 5 checks failed. Reason: " .. kickReason .. " You will be kicked in a minute!",
+                    Duration = 60,
+                    Icon     = "x-circle",
+                })
+
+                task.wait(60)
+                MystrixHub.KeyValidation.Running = false
+                LocalPlayer:Kick(kickReason)
+                return
+            else
+                MystrixHub.KeyValidation.ConfirmCount = 0
+            end
+
+            task.wait(10)
+        end
+    end)
+end
+
+if MystrixHub.Auth.UseKeySystem then
+    task.spawn(function()
+        while MystrixHub.Auth.KeyResult == nil do
+            task.wait(1)
+        end
+        MystrixHub.Functions.StartKeyValidation()
+    end)
+end
+
+function MystrixHub.Functions.SyncDropdownsToState()
+    local D = MystrixHub.UIController.Drops
+    if D.CoinMethod and D.CoinMethod.Value then
+        MystrixHub.CoinsController.Method = D.CoinMethod.Value
+    end
+    if D.FarmRarity then
+        MystrixHub.FarmController.SelectedRarities = D.FarmRarity.Value or {}
+    end
+    if D.FarmSpecific then
+        MystrixHub.FarmController.SelectedSpecific = D.FarmSpecific.Value or {}
+    end
+    if D.FarmMutation then
+        local v = D.FarmMutation.Value
+        MystrixHub.FarmController.SelectedMutations = (v and #v > 0) and v or {"Any"}
+    end
+    if D.SellMutation then
+        local v = D.SellMutation.Value
+        MystrixHub.SellController.SellMutationFilter = (v and #v > 0) and v or {"Any"}
+    end
+    if D.SellRarity then
+        MystrixHub.SellController.SelectedRarities = D.SellRarity.Value or {}
+    end
+    if D.SellSpecific then
+        MystrixHub.SellController.SpecificSelected = D.SellSpecific.Value or {}
+    end
+    if D.WebhookRarity then
+        MystrixHub.WebhookController.SelectedRarities = D.WebhookRarity.Value or {}
+    end
+    if D.WebhookMutation then
+        local v = D.WebhookMutation.Value
+        MystrixHub.WebhookController.SelectedMutations = (v and #v > 0) and v or {"Any"}
+    end
+    if D.WebhookSpecific then
+        MystrixHub.WebhookController.SelectedSpecific = D.WebhookSpecific.Value or {}
+    end
+    if D.GiftRarity then
+        MystrixHub.GiftController.SelectedRarities = D.GiftRarity.Value or {}
+    end
+    if D.GiftMutation then
+        local v = D.GiftMutation.Value
+        MystrixHub.GiftController.SelectedMutations = (v and #v > 0) and v or {"Any"}
+    end
+    if D.GiftSpecific then
+        MystrixHub.GiftController.SelectedSpecific = D.GiftSpecific.Value or {}
+    end
+    if D.WMEvent and D.WMEvent.Value then
+        MystrixHub.WeatherMachineController.SelectedEvent = D.WMEvent.Value
+    end
+    if D.WMKeepBrainrots and D.WMKeepBrainrots.Value then
+        MystrixHub.WeatherMachineController.KeepBrainrots = D.WMKeepBrainrots.Value or {"None"}
+    end
+    if D.ActivateEvents and D.ActivateEvents.Value then
+        MystrixHub.ActivateEventsController.SelectedEvents = D.ActivateEvents.Value or {}
+    end
+    if D.Theme and D.Theme.Value then
+        WindUI:SetTheme(D.Theme.Value)
+        local accent = MystrixHub.UIController.ThemeAccents[D.Theme.Value] or Color3.fromHex("#FFFFFF")
+        MystrixHub.Functions.UpdateTagAccents(accent)
+        MystrixHub.UIController.CurrentTheme = D.Theme.Value
+    end
+
+    -- Advanced Filters (restore from dropdown values to entry tables)
+    if MystrixHub.UIController.Drops.AdvancedFilters then
+        for idx, drops in pairs(MystrixHub.UIController.Drops.AdvancedFilters) do
+            local entry = MystrixHub.AdvancedFiltersController.Filters[idx]
+            if entry then
+                if drops.Brainrot and drops.Brainrot.Value then
+                    entry.brainrot = drops.Brainrot.Value
+                end
+                if drops.Mutation and drops.Mutation.Value then
+                    entry.mutation = drops.Mutation.Value
+                end
+            end
         end
     end
 end
@@ -1613,8 +2131,8 @@ end)
 MystrixHub.PlayerController.HWID = MystrixHub.Functions.GetHWID()
 MystrixHub.Functions.SyncServerTime()
 task.spawn(MystrixHub.Functions.FetchDiscordInfo)
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
-getgenv().WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/ummarxfarooq/WindUI/refs/heads/main/dist/main.lua"))()
+getgenv().WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/ummarxfarooq/WindUI/refs/heads/main/dist/main.lua"))()
 MystrixHub.UIController.WindUI = WindUI
 
 WindUI:AddTheme({
@@ -1637,7 +2155,7 @@ MystrixHub.UIController.Window = WindUI:CreateWindow({
     Icon                        = "chess-queen",
     Author                      = "Czm",
     Folder                      = MystrixHub.Meta.FolderName,
-    Theme                       = "Dark",
+    Theme                       = "Crimson",
     Size                        = UDim2.fromOffset(850, 560),
     MinSize                     = Vector2.new(560, 350),
     MaxSize                     = Vector2.new(850, 560),
@@ -1655,21 +2173,23 @@ MystrixHub.UIController.Window = WindUI:CreateWindow({
         URL      = "https://mystrixhub.alexrule49.workers.dev/",
         Thumbnail = { Image = MystrixHub.Meta.Logo, Width = 200 },
         KeyValidator = function(key)
-            local success, result = MystrixHub.Functions.VerifyKey(key)
-            if success then
-                MystrixHub.Auth.KeyResult = result
-                MystrixHub.Auth.KeyError  = nil
-                return true
-            end
-            if type(result) == "table" and result.hwidReset then
-                MystrixHub.Auth.KeyResult = result
-                MystrixHub.Auth.KeyError  = "HWID_RESET"
-                return true
-            end
-            MystrixHub.Auth.KeyResult = nil
-            MystrixHub.Auth.KeyError  = result
-            return false
-        end,
+    local success, result = MystrixHub.Functions.VerifyKey(key)
+    if success then
+        MystrixHub.Auth.KeyResult  = result
+        MystrixHub.Auth.KeyError   = nil
+        MystrixHub.Auth.RawKey     = MystrixHub.Functions.CleanKey(key)
+        return true
+    end
+    if type(result) == "table" and result.hwidReset then
+        MystrixHub.Auth.KeyResult  = result
+        MystrixHub.Auth.KeyError   = "HWID_RESET"
+        MystrixHub.Auth.RawKey     = MystrixHub.Functions.CleanKey(key)
+        return true
+    end
+    MystrixHub.Auth.KeyResult = nil
+    MystrixHub.Auth.KeyError  = result
+    return false, MystrixHub.Functions.GetFriendlyError(result)
+end,
     } or nil,
 })
 
@@ -1741,10 +2261,9 @@ MystrixHub.UIController.Tabs.Gifts   = MystrixHub.UIController.Window:Tab({ Titl
 MystrixHub.UIController.Tabs.Settings  = MystrixHub.UIController.Window:Tab({ Title = "Settings",  Icon = "settings" })
 MystrixHub.UIController.Tabs.Home:Select()
 
--- Brainrots Tab
 local CoinsSection = MystrixHub.UIController.Tabs.Brainrots:Section({ Title = "Coins", Icon = "coins", Box = true, Opened = true })
 
-CoinsSection:Dropdown({
+MystrixHub.UIController.Drops.CoinMethod = CoinsSection:Dropdown({
     Title     = "Method",
     Values    = {"Nearby", "Teleport"},
     Value     = "Nearby",
@@ -1799,14 +2318,15 @@ LevelSection:Slider({
 
 local UpgradeSection = MystrixHub.UIController.Tabs.Brainrots:Section({ Title = "Upgrade", Icon = "arrow-up", Box = true, Opened = true })
 
-MystrixHub.UpgradeController.Dropdown = UpgradeSection:Dropdown({
-    Title     = "Select Brainrots",
-    Icon      = "list",
-    Values    = {"Loading..."},
-    Multi     = true,            
-    AllowNone = true,
-    Flag      = "Upgrade_Selection",
-    Callback  = function() end,
+MystrixHub.UIController.Drops.UpgradeSelection = UpgradeSection:Dropdown({
+    Title            = "Select Brainrots",
+    Icon             = "list",
+    Values           = {"Loading..."},
+    SearchBarEnabled = true,
+    Multi            = true,
+    AllowNone        = true,
+    Flag             = "Upgrade_Selection",
+    Callback         = function() end,
 })
 
 local UpgBtnHStack = UpgradeSection:HStack()
@@ -1816,7 +2336,7 @@ local UpgRightV    = UpgBtnHStack:VStack()
 UpgLeftV:Button({
     Title    = "Upgrade",
     Callback = function()
-        local selected = MystrixHub.UpgradeController.Dropdown.Value
+        local selected = MystrixHub.UIController.Drops.UpgradeSelection and MystrixHub.UIController.Drops.UpgradeSelection.Value
         if selected and type(selected) == "table" and #selected > 0 then
             local maxLevel = MystrixHub.UpgradeController.MaxLevel
             for _, entry in ipairs(selected) do
@@ -1848,7 +2368,7 @@ UpgradeSection:Toggle({
             MystrixHub.UpgradeController.AutoRunning = true
             MystrixHub.UpgradeController.AutoLoop = task.spawn(function()
                 while MystrixHub.UpgradeController.AutoRunning do
-                    local selected = MystrixHub.UpgradeController.Dropdown.Value
+                    local selected = MystrixHub.UIController.Drops.UpgradeSelection and MystrixHub.UIController.Drops.UpgradeSelection.Value
                     if selected and type(selected) == "table" then
                         local maxLevel = MystrixHub.UpgradeController.MaxLevel
                         for _, entry in ipairs(selected) do
@@ -1879,10 +2399,10 @@ MystrixHub.UpgradeController.RefreshDropdown()
 
 local RaritySection = MystrixHub.UIController.Tabs.Brainrots:Section({ Title = "Upgrade by Rarity", Icon = "sfsymbols:cameraFilters", Box = true, Opened = true })
 
-MystrixHub.UpgradeController.RarityDropdown = RaritySection:Dropdown({
+MystrixHub.UIController.Drops.UpgradeRarity = RaritySection:Dropdown({
     Title     = "Select Rarities",
     Values    = MystrixHub.RarityOrder,
-    Multi     = true,              
+    Multi     = true,
     Flag      = "UpgradeRarityDropdown",
     AllowNone = true,
     Callback  = function() end,
@@ -1895,7 +2415,7 @@ local RarityRightV = RarityHStack:VStack()
 RarityLeftV:Button({
     Title    = "Upgrade",
     Callback = function()
-        local selected = MystrixHub.UpgradeController.RarityDropdown.Value
+        local selected = MystrixHub.UIController.Drops.UpgradeRarity and MystrixHub.UIController.Drops.UpgradeRarity.Value
         if selected and type(selected) == "table" then
             for _, rarity in ipairs(selected) do
                 MystrixHub.Functions.UpgradeSlotsSequentially(MystrixHub.Functions.GetMatchingSlots(rarity))
@@ -1914,7 +2434,7 @@ RarityRightV:Toggle({
             MystrixHub.UpgradeController.AutoRarityRunning = true
             MystrixHub.UpgradeController.AutoRarityLoop = task.spawn(function()
                 while MystrixHub.UpgradeController.AutoRarityRunning do
-                    local selected = MystrixHub.UpgradeController.RarityDropdown.Value
+                    local selected = MystrixHub.UIController.Drops.UpgradeRarity and MystrixHub.UIController.Drops.UpgradeRarity.Value
                     if selected and type(selected) == "table" then
                         for _, rarity in ipairs(selected) do
                             MystrixHub.Functions.UpgradeSlotsSequentially(MystrixHub.Functions.GetMatchingSlots(rarity))
@@ -1933,6 +2453,207 @@ RarityRightV:Toggle({
         end
     end,
 })
+local UpgradeLevel1Section = MystrixHub.UIController.Tabs.Brainrots:Section({
+    Title  = "Upgrade All Level 1 Brainrots",
+    Icon   = "solar:star-bold",
+    Box    = true,
+    Opened = true,
+})
+UpgradeLevel1Section:Button({
+    Title    = "Upgrade",
+    Callback = function()
+        task.spawn(function()
+            local targetLevel = MystrixHub.UpgradeController.MaxLevel
+            local upgradedCount = 0
+
+            local plot = MystrixHub.Functions.GetPlayerPlot()
+            if not plot then
+                WindUI:Notify({ Title = "Upgrade Level 1", Content = "Could not find your plot!", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            local occupiedSlots = MystrixHub.Functions.GetOccupiedSlotsSorted(plot)
+            for _, slotPart in ipairs(occupiedSlots) do
+                local num = tonumber(slotPart.Name:match("%d+"))
+                if not num then continue end
+
+                local currentLevel = MystrixHub.Functions.GetSlotBrainrotLevel(slotPart)
+                if currentLevel ~= 1 then continue end
+
+                local char = LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                if not root then continue end
+
+                root.CFrame = slotPart.CFrame * CFrame.new(0, 3, 0)
+                task.wait(0.5)
+
+                local attempts = 0
+                currentLevel = MystrixHub.Functions.GetSlotBrainrotLevel(slotPart)
+                while currentLevel < targetLevel and attempts < 200 do
+                    if not slotPart:FindFirstChild("PlacedPart") then break end
+                    MystrixHub.Functions.FireRemote("rev_B_Upgrade", num)
+                    task.wait(0.05)
+                    currentLevel = MystrixHub.Functions.GetSlotBrainrotLevel(slotPart)
+                    attempts = attempts + 1
+                end
+
+                if currentLevel >= targetLevel then
+                    upgradedCount = upgradedCount + 1
+                end
+
+                task.wait(0.5)
+            end
+
+            local slotsFolder = plot:FindFirstChild("Slots")
+            if not slotsFolder then
+                WindUI:Notify({
+                    Title    = "Upgrade Level 1 Done",
+                    Content  = "Finished! Total upgraded: " .. upgradedCount .. " brainrot(s).",
+                    Duration = 5,
+                    Icon     = "check-circle",
+                })
+                return
+            end
+
+            local EntitiesData
+            pcall(function()
+                EntitiesData = require(game:GetService("ReplicatedStorage").Shared.Data.EntitiesData)
+            end)
+
+            local function getLevel1BrainrotTools()
+                local backpack = LocalPlayer:FindFirstChild("Backpack")
+                if not backpack then return {} end
+                local tools = {}
+                for _, tool in ipairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local lvl = tonumber(tool:GetAttribute("Level")) or 1
+                        if lvl == 1 and (not EntitiesData or EntitiesData.Brainrots[tool.Name]) then
+                            table.insert(tools, tool)
+                        end
+                    end
+                end
+                return tools
+            end
+
+            local function getSlotsInOrder()
+                local slots = {}
+                for _, slotPart in ipairs(slotsFolder:GetChildren()) do
+                    if slotPart:IsA("BasePart") then
+                        local num = tonumber(slotPart.Name:match("%d+"))
+                        if num and num <= 30 then
+                            table.insert(slots, { part = slotPart, num = num })
+                        end
+                    end
+                end
+                table.sort(slots, function(a, b) return a.num < b.num end)
+                return slots
+            end
+
+            local slots = getSlotsInOrder()
+            if #slots == 0 then
+                WindUI:Notify({
+                    Title    = "Upgrade Level 1 Done",
+                    Content  = "Finished! Total upgraded: " .. upgradedCount .. " brainrot(s).",
+                    Duration = 5,
+                    Icon     = "check-circle",
+                })
+                return
+            end
+
+            local slotIndex = 1
+            local tools = getLevel1BrainrotTools()
+
+            while #tools > 0 do
+                local slotEntry = slots[slotIndex]
+                if not slotEntry then break end
+
+                local slotPart = slotEntry.part
+                local num = slotEntry.num
+
+                local tool = tools[1]
+                if not tool or tool.Parent ~= LocalPlayer:FindFirstChild("Backpack") then
+                    tools = getLevel1BrainrotTools()
+                    if #tools == 0 then break end
+                    tool = tools[1]
+                    if not tool then break end
+                end
+
+                local char = LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                local hum  = char and char:FindFirstChildOfClass("Humanoid")
+                if not root or not hum then break end
+
+                root.CFrame = slotPart.CFrame * CFrame.new(0, 3, 0)
+                task.wait(0.5)
+
+                pcall(function() hum:UnequipTools() end)
+                task.wait(0.2)
+
+                pcall(function() hum:EquipTool(tool) end)
+                task.wait(0.3)
+
+                local equippedTool = char:FindFirstChildOfClass("Tool")
+                if not equippedTool or equippedTool ~= tool then
+                    pcall(function() hum:UnequipTools() end)
+                    task.wait(0.1)
+                    pcall(function() hum:EquipTool(tool) end)
+                    task.wait(0.3)
+                end
+
+                pcall(function()
+                    ReplicatedStorage:WaitForChild("Shared")
+                        :WaitForChild("Packages")
+                        :WaitForChild("Network")
+                        :WaitForChild("rev_S_Interact"):FireServer(num)
+                end)
+                task.wait(0.1)
+
+                pcall(function() hum:UnequipTools() end)
+                task.wait(0.2)
+
+                local placed = nil
+                local waitT = 0
+                while not placed and waitT < 3 do
+                    placed = slotPart:FindFirstChild("PlacedPart")
+                    if not placed then task.wait(0.1) end
+                    waitT = waitT + 0.1
+                end
+
+                if placed then
+                    local attempts = 0
+                    local currentLevel = MystrixHub.Functions.GetSlotBrainrotLevel(slotPart)
+                    while currentLevel < targetLevel and attempts < 200 do
+                        if not slotPart:FindFirstChild("PlacedPart") then break end
+                        MystrixHub.Functions.FireRemote("rev_B_Upgrade", num)
+                        task.wait(0.05)
+                        currentLevel = MystrixHub.Functions.GetSlotBrainrotLevel(slotPart)
+                        attempts = attempts + 1
+                    end
+
+                    if currentLevel >= targetLevel then
+                        upgradedCount = upgradedCount + 1
+                    end
+                end
+
+                task.wait(0.5)
+
+                slotIndex = slotIndex + 1
+                if slotIndex > #slots then
+                    slotIndex = 1
+                end
+
+                tools = getLevel1BrainrotTools()
+            end
+
+            WindUI:Notify({
+                Title    = "Upgrade Level 1 Done",
+                Content  = "Finished! Total upgraded: " .. upgradedCount .. " brainrot(s).",
+                Duration = 5,
+                Icon     = "check-circle",
+            })
+        end)
+    end,
+})
 
 local EquipBestSection = MystrixHub.UIController.Tabs.Brainrots:Section({
     Title = "Equip Best",
@@ -1943,14 +2664,12 @@ local EquipBestSection = MystrixHub.UIController.Tabs.Brainrots:Section({
 
 local EquipBestCPSMode = "Base CPS"   
 
-EquipBestSection:Dropdown({
+MystrixHub.UIController.Drops.EquipBestCPSMode = EquipBestSection:Dropdown({
     Title     = "CPS",
     Values    = {"Base CPS", "Current CPS"},
     Value     = "Base CPS",
     Flag      = "EquipBestCPSMode",
-    Callback  = function(value)
-        EquipBestCPSMode = value
-    end,
+    Callback  = function(value) EquipBestCPSMode = value end,
 })
 
 EquipBestSection:Button({
@@ -2017,14 +2736,12 @@ local AutoPlaceSection = MystrixHub.UIController.Tabs.Brainrots:Section({
     Opened = true,
 })
 
-AutoPlaceSection:Dropdown({
+MystrixHub.UIController.Drops.AutoPlaceCPSMode = AutoPlaceSection:Dropdown({
     Title    = "CPS",
-Values   = {"Base CPS", "Current CPS", "Base Level 1"},
+    Values   = {"Base CPS", "Current CPS", "Base Level 1"},
     Value    = "Base CPS",
     Flag     = "AutoPlaceCPSMode",
-    Callback = function(value)
-        MystrixHub.AutoPlaceController.CPSMode = value
-    end,
+    Callback = function(value) MystrixHub.AutoPlaceController.CPSMode = value end,
 })
 
 AutoPlaceSection:Button({
@@ -2254,7 +2971,7 @@ for _, rarity in ipairs(favRarityList) do
     end
 end
 
-local favRarityDropdown = FavouritesSection:Dropdown({
+MystrixHub.UIController.Drops.FavRarity = FavouritesSection:Dropdown({
     Title     = "Rarity",
     Values    = favRarityList,
     Multi     = true,
@@ -2264,30 +2981,32 @@ local favRarityDropdown = FavouritesSection:Dropdown({
     Callback  = function() end,
 })
 
-local favMutationDropdown = FavouritesSection:Dropdown({
-    Title     = "Mutations",
-    Values    = {"Any","None","Golden","Diamond","Plasma","Radioactive","Molten","Void","Virus","Shadow","Electrified","Rainbow","Alien","Enchanted","Bacon","Wet","Astral","Phantom"},
-    Multi     = true,
-    AllowNone = true,
-    Flag      = "FavMutation",
-    Value     = {"Any"},
-    Callback  = function() end,
+MystrixHub.UIController.Drops.FavMutation = FavouritesSection:Dropdown({
+    Title            = "Mutations",
+    Values           = MystrixHub.MutationController:GetList(),
+    Multi            = true,
+    AllowNone        = true,
+    Flag             = "FavMutation",
+    SearchBarEnabled = true,
+    Value            = {"Any"},
+    Callback         = function() end,
 })
 
-local favSpecificDropdown = FavouritesSection:Dropdown({
-    Title     = "Specific Brainrots",
-    Values    = favSpecificList,
-    Multi     = true,
-    AllowNone = true,
-    Flag      = "FavSpecific",
-    Value     = {},
-    Callback  = function() end,
+MystrixHub.UIController.Drops.FavSpecific = FavouritesSection:Dropdown({
+    Title            = "Specific Brainrots",
+    Values           = favSpecificList,
+    Multi            = true,
+    SearchBarEnabled = true,
+    AllowNone        = true,
+    Flag             = "FavSpecific",
+    Value            = {},
+    Callback         = function() end,
 })
 
 local function matchesFavFilters(tool)
     if not tool:IsA("Tool") then return false end
 
-    local mutFilter = favMutationDropdown.Value or {"Any"}
+    local mutFilter = MystrixHub.UIController.Drops.FavMutation and MystrixHub.UIController.Drops.FavMutation.Value or {"Any"}
     local mutOk = false
     if table.find(mutFilter, "Any") then
         mutOk = true
@@ -2300,12 +3019,12 @@ local function matchesFavFilters(tool)
     end
     if not mutOk then return false end
 
-    local specificFilter = favSpecificDropdown.Value or {}
+    local specificFilter = MystrixHub.UIController.Drops.FavSpecific and MystrixHub.UIController.Drops.FavSpecific.Value or {}
     if #specificFilter > 0 then
         return table.find(specificFilter, tool.Name) ~= nil
     end
 
-    local rarityFilter = favRarityDropdown.Value or {}
+    local rarityFilter = MystrixHub.UIController.Drops.FavRarity and MystrixHub.UIController.Drops.FavRarity.Value or {}
     if #rarityFilter > 0 then
         local rarity = MystrixHub.Functions.GetRarityOfBrainrot(tool.Name)
         if rarity and table.find(rarityFilter, rarity) then
@@ -2400,7 +3119,6 @@ FavRow:VStack():Toggle({
 })
 
 
--- Upgrades Tab
 local SlotsSection = MystrixHub.UIController.Tabs.Upgrades:Section({ Title = "Slots", Icon = "square-stack", Box = true, Opened = true })
 
 SlotsSection:Button({
@@ -2477,11 +3195,11 @@ SpeedRight:Toggle({
 
 local WeightsSection = MystrixHub.UIController.Tabs.Upgrades:Section({ Title = "Weights", Icon = "dumbbell", Box = true, Opened = true })
 
-MystrixHub.WeightsController.Dropdown = WeightsSection:Dropdown({
+MystrixHub.UIController.Drops.WeightSelection = WeightsSection:Dropdown({
     Title     = "Select Weights",
     Values    = MystrixHub.WeightNames,
     Multi     = true,
-    Flag     = "sweightdropdown",
+    Flag      = "sweightdropdown",
     AllowNone = true,
     Callback  = function() end,
 })
@@ -2493,7 +3211,7 @@ local WeightRight  = WeightHStack:VStack()
 WeightLeft:Button({
     Title    = "Buy",
     Callback = function()
-        local selected = MystrixHub.WeightsController.Dropdown.Value
+        local selected = MystrixHub.UIController.Drops.WeightSelection and MystrixHub.UIController.Drops.WeightSelection.Value
         if selected and type(selected) == "table" then
             for _, name in ipairs(selected) do
                 MystrixHub.Functions.FireRemote("rev_Shop_Buy", "WeightShop", name)
@@ -2512,7 +3230,7 @@ WeightRight:Toggle({
             MystrixHub.WeightsController.AutoRunning = true
             MystrixHub.WeightsController.AutoLoop = task.spawn(function()
                 while MystrixHub.WeightsController.AutoRunning do
-                    local selected = MystrixHub.WeightsController.Dropdown.Value
+                    local selected = MystrixHub.UIController.Drops.WeightSelection and MystrixHub.UIController.Drops.WeightSelection.Value
                     if selected and type(selected) == "table" then
                         for _, name in ipairs(selected) do
                             MystrixHub.Functions.FireRemote("rev_Shop_Buy", "WeightShop", name)
@@ -2571,7 +3289,6 @@ RebirthsSection:Toggle({
     end,
 })
 
--- Sell Tab
 local EquippedSection = MystrixHub.UIController.Tabs.Sell:Section({ Title = "Equipped", Icon = "hand-fist", Box = true, Opened = true })
 
 EquippedSection:Button({
@@ -2611,25 +3328,26 @@ AllSection:Button({
 
 local MutationSellSection = MystrixHub.UIController.Tabs.Sell:Section({ Title = "Mutation", Icon = "bolt", Box = true, Opened = true })
 
-MutationSellSection:Dropdown({
-    Title     = "Mutation Filter",
-    Values    = {"Any","None","Golden","Diamond","Plasma","Radioactive","Molten","Void","Virus","Shadow","Electrified","Rainbow","Alien","Enchanted","Bacon","Wet","Astral","Phantom"},
-    Multi     = true,
-    AllowNone = true,
-    Flag      = "SellMutationFilter",
-    Value     = {"Any"},
-    Callback  = function(sel)
-        MystrixHub.SellController.SellMutationFilter = sel or {"Any"}
+MystrixHub.UIController.Drops.SellMutation = MutationSellSection:Dropdown({
+    Title            = "Mutation Filter",
+    Values           = MystrixHub.MutationController:GetList(),
+    Multi            = true,
+    AllowNone        = true,
+    Flag             = "SellMutationFilter",
+    SearchBarEnabled = true,
+    Value            = {"Any"},
+    Callback         = function(sel)
+        MystrixHub.SellController.SellMutationFilter = (sel and #sel > 0) and sel or {"Any"}
     end,
 })
 
 local RaritySellSection = MystrixHub.UIController.Tabs.Sell:Section({ Title = "Rarity", Icon = "solar:checklist-bold", Box = true, Opened = true })
 
-RaritySellSection:Dropdown({
+MystrixHub.UIController.Drops.SellRarity = RaritySellSection:Dropdown({
     Title     = "Select Rarities",
     Values    = MystrixHub.RarityOrder,
     Multi     = true,
-    Flag     = "rarityselldp",
+    Flag      = "rarityselldp",
     AllowNone = true,
     Callback  = function(selected) MystrixHub.SellController.SelectedRarities = selected or {} end,
 })
@@ -2693,13 +3411,14 @@ for _, rarity in ipairs(MystrixHub.RarityOrder) do
     end
 end
 
-SpecificSection:Dropdown({
-    Title     = "Select Brainrots",
-    Values    = allBrainrotsSorted,
-    Multi     = true,
-    AllowNone = true,
-    Flag     = "specificselldp",
-    Callback  = function(selected) MystrixHub.SellController.SpecificSelected = selected or {} end,
+MystrixHub.UIController.Drops.SellSpecific = SpecificSection:Dropdown({
+    Title            = "Select Brainrots",
+    Values           = allBrainrotsSorted,
+    Multi            = true,
+    AllowNone        = true,
+    SearchBarEnabled = true,
+    Flag             = "specificselldp",
+    Callback         = function(selected) MystrixHub.SellController.SpecificSelected = selected or {} end,
 })
 
 local SpecificHStack = SpecificSection:HStack()
@@ -2749,12 +3468,343 @@ SpecificSection:Slider({
     Callback = function(value) MystrixHub.SellController.SpecificDelay = value end,
 })
 
+local function FormatSellCPSDisplay(kVal)
+    if kVal == 0 then
+        return "Not Set — CPS Sell Filter Inactive"
+    end
+    local raw = kVal * 1000
+    if raw >= 1e9 then
+        local b = raw / 1e9
+        return string.format(
+            b == math.floor(b)
+                and "%dB (Selling brainrots below this CPS)"
+                or  "%.1fB (Selling brainrots below this CPS)", b)
+    elseif raw >= 1e6 then
+        local m = raw / 1e6
+        return string.format(
+            m == math.floor(m)
+                and "%dM (Selling brainrots below this CPS)"
+                or  "%.1fM (Selling brainrots below this CPS)", m)
+    else
+        return kVal .. "K (Selling brainrots below this CPS)"
+    end
+end
+
+local CPSSellSection = MystrixHub.UIController.Tabs.Sell:Section({
+    Title  = "CPS",
+    Icon   = "activity",
+    Box    = true,
+    Opened = true,
+})
+
+local SellCPSParagraph = CPSSellSection:Paragraph({
+    Title  = "CPS Sell Filter",
+    Desc   = "Not Set — CPS Sell Filter Inactive",
+    Locked = false,
+})
+MystrixHub.SellCPSController.Paragraph = SellCPSParagraph
+
+CPSSellSection:Slider({
+    Title    = "Max CPS (Sell Below)",
+    Value    = { Min = 0, Max = 100000, Default = 0 },
+    Step     = 1,
+    Flag     = "CPSSellSlider",
+    Callback = function(value)
+        MystrixHub.SellCPSController.MinCPS = value
+        pcall(function()
+            SellCPSParagraph:SetDesc(FormatSellCPSDisplay(value))
+        end)
+    end,
+})
+
+local CPSSellHStack = CPSSellSection:HStack()
+local CPSSellLeft   = CPSSellHStack:VStack()
+local CPSSellRight  = CPSSellHStack:VStack()
+
+CPSSellLeft:Button({
+    Title    = "Sell",
+    Callback = function()
+        task.spawn(MystrixHub.Functions.SellBrainrotsByCPS)
+    end,
+})
+
+CPSSellRight:Toggle({
+    Title    = "Auto Sell",
+    Value    = false,
+    Flag     = "CPSSellAuto",
+    Callback = function(state)
+        if state then
+            if MystrixHub.SellCPSController.Running then return end
+            MystrixHub.SellCPSController.Running = true
+            MystrixHub.SellCPSController.Loop = task.spawn(function()
+                while MystrixHub.SellCPSController.Running do
+                    MystrixHub.Functions.SellBrainrotsByCPS()
+                    task.wait(5)
+                end
+            end)
+        else
+            MystrixHub.SellCPSController.Running = false
+            if MystrixHub.SellCPSController.Loop then
+                task.cancel(MystrixHub.SellCPSController.Loop)
+                MystrixHub.SellCPSController.Loop = nil
+            end
+        end
+    end,
+})
+
+local NonFavSection = MystrixHub.UIController.Tabs.Sell:Section({
+    Title  = "Non-Favourites",
+    Icon   = "star-off",
+    Box    = true,
+    Opened = true,
+})
+
+NonFavSection:Button({
+    Title    = "Sell",
+    Callback = function()
+        task.spawn(MystrixHub.Functions.SellNonFavourites)
+    end,
+})
+
 local SetKickPower = require(game:GetService("ReplicatedStorage").Modules.UILoader.SetKickPower)
 local SliderChanged = SetKickPower.SliderChanged  
-local WeatherService = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.WeatherService_Client)
-local VolcanoHandler = require(game:GetService("ReplicatedStorage").Modules.HandlerLoader.VolcanoHandler)
+local rarityPower = {
+    Common    = 0,
+    Rare      = 50,
+    Epic      = 2200,
+    Legendary = 33000,
+    Mythic    = 225000,
+    Godly     = 1050000,
+    Secret    = 3600000,
+    Hacked    = 75000000,
+    OG        = 250000000,
+    Celestial = 250000000,
+}
 
--- Auto Farm Tab
+local RARITY_ORDER = {"Common","Rare","Epic","Legendary","Mythic","Godly","Secret","Hacked","OG","Celestial","Eternal"}
+
+local function getSliderPercentForRarity(rarity)
+    if rarity == "Celestial" or rarity == "Eternal" then return 1 end
+    local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
+    local level = KickSvc.Level or 1
+    local directRarities = {Common=true,Rare=true,Epic=true,Legendary=true,Mythic=true,Hacked=true}
+    local targetRarity = rarity
+    if not directRarities[rarity] then
+        local idx = table.find(RARITY_ORDER, rarity)
+        if idx and idx < #RARITY_ORDER then targetRarity = RARITY_ORDER[idx + 1] end
+    end
+    local targetPower = rarityPower[targetRarity] or 0
+    if targetPower <= 0 then return 0 end
+    return math.clamp(targetPower / level, 0, 1)
+end
+
+local autoKickRarityPower = {
+    Common    = 0,
+    Rare      = 100,
+    Epic      = 5000,
+    Legendary = 75000,
+    Mythic    = 500000,
+    Godly     = 2000000,
+    Secret    = 6000000,
+    Divine    = 20000000,
+    Hacked    = 50000000,
+    OG        = 250000000,
+    Celestial = 2000000000,
+    Eternal   = 3000000000,
+}
+
+local autoKickRarityOrderHighToLow = {
+    "Eternal","Celestial","OG","Hacked","Divine",
+    "Secret","Godly","Mythic","Legendary","Epic","Rare","Common"
+}
+
+MystrixHub.WeatherMachineController.Start = function()
+    if MystrixHub.WeatherMachineController.Running then return end
+    local event = MystrixHub.WeatherMachineController.SelectedEvent
+    if not event or event == "" then
+        WindUI:Notify({ Title = "Weather Machine", Content = "No event selected.", Duration = 3, Icon = "alert-circle" })
+        return
+    end
+    MystrixHub.WeatherMachineController.Running = true
+    MystrixHub.WeatherMachineController.SavedSettings = {
+        Specific  = MystrixHub.FarmController.SelectedSpecific,
+        Rarities  = MystrixHub.FarmController.SelectedRarities,
+        Mutations = MystrixHub.FarmController.SelectedMutations,
+        Percent   = MystrixHub.FarmController.KickPercent,
+    }
+    if not MystrixHub.FarmController.Running then
+        MystrixHub.FarmController.Start()
+        MystrixHub.WeatherMachineController.StartedFarm = true
+    end
+    MystrixHub.WeatherMachineController.Loop = task.spawn(function()
+        local ok, SacrificeData = pcall(function()
+            return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+        end)
+        if not ok or not SacrificeData then
+            WindUI:Notify({ Title = "Weather Machine", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
+            MystrixHub.WeatherMachineController.Running = false
+            return
+        end
+        local recipe = SacrificeData.Recipes[event]
+        if not recipe or #recipe == 0 then
+            WindUI:Notify({ Title = "Weather Machine", Content = event .. " has no recipe data.", Duration = 3, Icon = "alert-circle" })
+            MystrixHub.WeatherMachineController.Running = false
+            return
+        end
+        local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
+        local requirements = {}
+        for _, req in ipairs(recipe) do
+            if req.Name and req.Name ~= "" then table.insert(requirements, req) end
+        end
+        if #requirements == 0 then
+            WindUI:Notify({ Title = "Weather Machine", Content = event .. " has no valid brainrots.", Duration = 3, Icon = "alert-circle" })
+            MystrixHub.WeatherMachineController.Running = false
+            return
+        end
+        table.sort(requirements, function(a, b)
+            local rarityAsc = {Common=1,Rare=2,Epic=3,Legendary=4,Mythic=5,Godly=6,Secret=7,Divine=8,Hacked=9,OG=10,Celestial=11,Eternal=12}
+            local ra = a.Name and MystrixHub.Functions.GetRarityOfBrainrot(a.Name) or "Common"
+            local rb = b.Name and MystrixHub.Functions.GetRarityOfBrainrot(b.Name) or "Common"
+            return (rarityAsc[ra] or 99) < (rarityAsc[rb] or 99)
+        end)
+        local keepList = MystrixHub.WeatherMachineController.KeepBrainrots or {"None"}
+        local keepSet = {}
+        for _, name in ipairs(keepList) do
+            if name ~= "None" then keepSet[name] = true end
+        end
+        WindUI:Notify({ Title = "Weather Machine", Content = "Starting: " .. event, Duration = 3, Icon = "cloud-lightning" })
+        while MystrixHub.WeatherMachineController.Running do
+            for _, req in ipairs(requirements) do
+                if not MystrixHub.WeatherMachineController.Running then break end
+                local brainName = req.Name
+                local rarity = MystrixHub.Functions.GetRarityOfBrainrot(brainName) or "Common"
+                local neededPercent = getSliderPercentForRarity(rarity)
+                SliderChanged:Fire(neededPercent)
+                MystrixHub.FarmController.KickPercent = neededPercent
+                KickSvc.Percent = neededPercent
+                task.wait(0.05)
+                local keepSpecific = {brainName}
+                for name in pairs(keepSet) do table.insert(keepSpecific, name) end
+                MystrixHub.FarmController.SelectedSpecific = keepSpecific
+                MystrixHub.FarmController.SelectedRarities = {}
+                MystrixHub.FarmController.SelectedMutations = {"Any"}
+                WindUI:Notify({
+                    Title   = "Weather Machine",
+                    Content = string.format("Farming %s [%s] for %s", brainName, rarity, event),
+                    Duration = 3, Icon = "cloud-lightning",
+                })
+                local bp = LocalPlayer:FindFirstChild("Backpack")
+                local startCount = 0
+                if bp then
+                    for _, tool in ipairs(bp:GetChildren()) do
+                        if tool:IsA("Tool") and tool.Name == brainName then startCount += 1 end
+                    end
+                end
+                local timeout, waited = 300, 0
+                while MystrixHub.WeatherMachineController.Running and waited < timeout do
+                    local newCount = 0
+                    local bp2 = LocalPlayer:FindFirstChild("Backpack")
+                    if bp2 then
+                        for _, tool in ipairs(bp2:GetChildren()) do
+                            if tool:IsA("Tool") and tool.Name == brainName then newCount += 1 end
+                        end
+                    end
+                    if newCount > startCount then break end
+                    task.wait(0.3)
+                    waited += 0.3
+                end
+            end
+            if MystrixHub.WeatherMachineController.Running then
+                WindUI:Notify({ Title = "Weather Machine", Content = "✅ " .. event .. " set complete! Restarting...", Duration = 4, Icon = "check-circle" })
+            end
+        end
+        local saved = MystrixHub.WeatherMachineController.SavedSettings
+        MystrixHub.FarmController.SelectedSpecific  = saved.Specific or {}
+        MystrixHub.FarmController.SelectedRarities  = saved.Rarities or {}
+        MystrixHub.FarmController.SelectedMutations = saved.Mutations or {"Any"}
+        MystrixHub.FarmController.KickPercent       = saved.Percent or 1
+        KickSvc.Percent = saved.Percent or 1
+        MystrixHub.WeatherMachineController.Running = false
+        if MystrixHub.WeatherMachineController.StartedFarm and MystrixHub.FarmController.Running then
+            MystrixHub.FarmController.Stop()
+            MystrixHub.WeatherMachineController.StartedFarm = false
+        end
+    end)
+end
+
+MystrixHub.WeatherMachineController.Stop = function()
+    MystrixHub.WeatherMachineController.Running = false
+    if MystrixHub.WeatherMachineController.Loop then
+        task.cancel(MystrixHub.WeatherMachineController.Loop)
+        MystrixHub.WeatherMachineController.Loop = nil
+    end
+    local saved = MystrixHub.WeatherMachineController.SavedSettings
+    if saved then
+        MystrixHub.FarmController.SelectedSpecific  = saved.Specific or {}
+        MystrixHub.FarmController.SelectedRarities  = saved.Rarities or {}
+        MystrixHub.FarmController.SelectedMutations = saved.Mutations or {"Any"}
+        MystrixHub.FarmController.KickPercent       = saved.Percent or 1
+        pcall(function()
+            local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
+            KickSvc.Percent = saved.Percent or 1
+        end)
+    end
+    if MystrixHub.WeatherMachineController.StartedFarm and MystrixHub.FarmController.Running then
+        MystrixHub.FarmController.Stop()
+        MystrixHub.WeatherMachineController.StartedFarm = false
+    end
+end
+
+MystrixHub.ActivateEventsController.Start = function()
+    if MystrixHub.ActivateEventsController.Loop then
+        task.cancel(MystrixHub.ActivateEventsController.Loop)
+    end
+    local SacrificeData
+    pcall(function() SacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData) end)
+    MystrixHub.ActivateEventsController.AutoActivate = true
+    MystrixHub.ActivateEventsController.Loop = task.spawn(function()
+        while MystrixHub.ActivateEventsController.AutoActivate do
+            for _, eventName in ipairs(MystrixHub.ActivateEventsController.SelectedEvents) do
+                if not MystrixHub.ActivateEventsController.AutoActivate then break end
+                if not SacrificeData then continue end
+                local recipe = SacrificeData.Recipes[eventName]
+                if not recipe or #recipe == 0 then continue end
+                local allMet = true
+                local bp = LocalPlayer:FindFirstChild("Backpack")
+                for _, req in ipairs(recipe) do
+                    if not req.Name then allMet = false break end
+                    local found = false
+                    if bp then
+                        for _, tool in ipairs(bp:GetChildren()) do
+                            if tool:IsA("Tool") and tool.Name == req.Name then
+                                local mutOk = (not req.Mutation) or req.Mutation == "Any"
+                                    or tool:GetAttribute("Mutation") == req.Mutation
+                                if mutOk then found = true break end
+                            end
+                        end
+                    end
+                    if not found then allMet = false break end
+                end
+                if allMet then
+                    pcall(function() MystrixHub.Functions.FireRemote("rev_sbe", eventName) end)
+                    WindUI:Notify({ Title = "Activate Events", Content = "Activated: " .. eventName, Duration = 3, Icon = "zap" })
+                end
+            end
+            task.wait(5)
+        end
+    end)
+end
+
+MystrixHub.ActivateEventsController.Stop = function()
+    MystrixHub.ActivateEventsController.AutoActivate = false
+    if MystrixHub.ActivateEventsController.Loop then
+        task.cancel(MystrixHub.ActivateEventsController.Loop)
+        MystrixHub.ActivateEventsController.Loop = nil
+    end
+end
+local WeatherService = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.WeatherService_Client)
+
+
 local KickSection = MystrixHub.UIController.Tabs.AutoFarm:Section({ Title = "Kick Power", Icon = "sfsymbols:figureKickboxing", Box = true, Opened = true })
 KickSection:Toggle({
     Title    = "Auto x2 Bonus",
@@ -2815,7 +3865,7 @@ for _, rarity in ipairs(farmRarityOrder) do
     end
 end
 
-BrainrotSection:Dropdown({
+MystrixHub.UIController.Drops.FarmRarity = BrainrotSection:Dropdown({
     Title     = "Rarity",
     Values    = farmRarityOrder,
     Multi     = true,
@@ -2825,25 +3875,31 @@ BrainrotSection:Dropdown({
     Callback  = function(sel) MystrixHub.FarmController.SelectedRarities = sel or {} end,
 })
 
-BrainrotSection:Dropdown({
-    Title     = "Specific Brainrots",
-    Values    = specificFarmValues,
-    Multi     = true,
-    AllowNone = true,
-    Flag      = "afbrainrotdp",
-    Value     = {},
-    Callback  = function(sel) MystrixHub.FarmController.SelectedSpecific = sel or {} end,
+MystrixHub.UIController.Drops.FarmSpecific = BrainrotSection:Dropdown({
+    Title            = "Specific Brainrots",
+    Values           = specificFarmValues,
+    Multi            = true,
+    AllowNone        = true,
+    SearchBarEnabled = true,
+    Flag             = "afbrainrotdp",
+    Value            = {},
+    Callback         = function(sel) MystrixHub.FarmController.SelectedSpecific = sel or {} end,
 })
 
-BrainrotSection:Dropdown({
-    Title     = "Mutations",
-    Values    = {"Any","None","Golden","Diamond","Plasma","Radioactive","Molten","Void","Virus","Shadow","Electrified","Rainbow","Alien","Enchanted","Bacon","Wet","Astral","Phantom"},
-    Multi     = true,
-    AllowNone = true,
-    Flag      = "afmutationdp",
-    Value     = {"Any"},
-    Callback  = function(sel) MystrixHub.FarmController.SelectedMutations = sel or {} end,
+MystrixHub.UIController.Drops.FarmMutation = BrainrotSection:Dropdown({
+    Title            = "Mutations",
+    Values           = MystrixHub.MutationController:GetList(),
+    Multi            = true,
+    AllowNone        = true,
+    SearchBarEnabled = true,
+    Flag             = "afmutationdp",
+    Value            = {"Any"},
+    Callback         = function(sel)
+        MystrixHub.FarmController.SelectedMutations = (sel and #sel > 0) and sel or {"Any"}
+    end,
 })
+
+BrainrotSection:Divider()
 
 BrainrotSection:Button({
     Title    = "Fix Camera",
@@ -2857,6 +3913,100 @@ BrainrotSection:Button({
         })
     end,
 })
+
+BrainrotSection:Toggle({
+    Title    = "Auto Adjust Kick Power to Selected Rarity",
+    Value    = false,
+    Flag     = "AutoAdjustKickPower",
+    Callback = function(state)
+        if state then
+            if MystrixHub.AutoKickPowerController.Running then return end
+            MystrixHub.AutoKickPowerController.Running = true
+            MystrixHub.AutoKickPowerController.Loop = task.spawn(function()
+                while MystrixHub.AutoKickPowerController.Running do
+                    local selected = MystrixHub.FarmController.SelectedRarities
+                    if selected and #selected > 0 then
+
+                        local highestRarity = nil
+                        for _, rarity in ipairs(autoKickRarityOrderHighToLow) do
+                            if table.find(selected, rarity) then
+                                highestRarity = rarity
+                                break
+                            end
+                        end
+                        if highestRarity then
+                            pcall(function()
+                                local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
+                                local level       = KickSvc.Level or 1
+                                local targetPower = autoKickRarityPower[highestRarity] or 0
+                                local percent
+                                if targetPower <= 0 then
+                                    percent = 0
+                                elseif targetPower >= 5000000000 then
+
+                                    percent = 1
+                                else
+                                    percent = math.clamp(targetPower / level, 0, 1)
+                                end
+                                SliderChanged:Fire(percent)
+                                KickSvc.Percent = percent
+                                MystrixHub.FarmController.KickPercent = percent
+                            end)
+                        end
+                    end
+                    task.wait(1)
+                end
+            end)
+        else
+            MystrixHub.AutoKickPowerController.Running = false
+            if MystrixHub.AutoKickPowerController.Loop then
+                task.cancel(MystrixHub.AutoKickPowerController.Loop)
+                MystrixHub.AutoKickPowerController.Loop = nil
+            end
+        end
+    end,
+})
+
+BrainrotSection:Divider()
+
+local function FormatCPSDisplay(kVal)
+    if kVal == 0 then
+        return "Not Set — Following Other Filters"
+    end
+    local raw = kVal * 1000
+    if raw >= 1e6 then
+        local m = raw / 1e6
+        if m == math.floor(m) then
+            return math.floor(m) .. "M+ (Keeping brainrots at or above this CPS)"
+        else
+            return string.format("%.1fM+ (Keeping brainrots at or above this CPS)", m)
+        end
+    else
+        return kVal .. "K+ (Keeping brainrots at or above this CPS)"
+    end
+end
+
+local CPSParagraph = BrainrotSection:Paragraph({
+    Title  = "CPS Filter",
+    Desc   = "Not Set — Following Other Filters",
+    Locked = false,
+})
+MystrixHub.CPSFilterController.Paragraph = CPSParagraph
+
+BrainrotSection:Slider({
+    Title    = "Min CPS",
+    Value    = { Min = 0, Max = 100000, Default = 0 },
+    Step     = 1,
+    Flag     = "CPSFilterSlider",
+    Callback = function(value)
+        MystrixHub.CPSFilterController.MinCPS = value
+        pcall(function()
+            CPSParagraph:SetDesc(FormatCPSDisplay(value))
+        end)
+    end,
+})
+
+BrainrotSection:Divider()
 
 local Row2 = BrainrotSection:HStack()
 Row2:VStack():Toggle({
@@ -2883,113 +4033,216 @@ Row2:VStack():Toggle({
     end,
 })
 
+MystrixHub.AdvancedFiltersController = {
+    Filters     = {},
+    FilterCount = 0,
+    AddButton   = nil,
+    TopDivider  = nil,
+}
 
--- Volcano Event Section
-local VolcanoSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
-    Title  = "Volcano Event",
-    Icon   = "flame",
+local advRarityOrder = {
+    "Eternal","Celestial","OG","Hacked","Divine",
+    "Secret","Godly","Mythic","Legendary","Epic","Rare","Common"
+}
+
+local advBrainrotList = {}
+for _, rarity in ipairs(advRarityOrder) do
+    local names = MystrixHub.RarityData[rarity]
+    if names then
+        for _, name in ipairs(names) do
+            table.insert(advBrainrotList, name)
+        end
+    end
+end
+
+local advMutList = MystrixHub.MutationController:GetList()
+
+local AdvFiltersSection = BrainrotSection:Section({
+    Title  = "Advanced Filters",
+    Icon   = "sliders-horizontal",
+    Box    = true,
+    Opened = false,
+})
+
+local function AddAdvancedFilterPair()
+    if MystrixHub.AdvancedFiltersController.AddButton then
+        pcall(function() MystrixHub.AdvancedFiltersController.AddButton:Destroy() end)
+        MystrixHub.AdvancedFiltersController.AddButton = nil
+    end
+
+    MystrixHub.AdvancedFiltersController.FilterCount += 1
+    local idx   = MystrixHub.AdvancedFiltersController.FilterCount
+    local entry = { brainrot = nil, mutation = "Any" }
+    table.insert(MystrixHub.AdvancedFiltersController.Filters, entry)
+
+    if not MystrixHub.UIController.Drops.AdvancedFilters then
+        MystrixHub.UIController.Drops.AdvancedFilters = {}
+    end
+
+    local brainrotDropdown = AdvFiltersSection:Dropdown({
+        Title            = "Brainrot",
+        Values           = advBrainrotList,
+        Multi            = true,
+        AllowNone        = true,
+        SearchBarEnabled = true,
+        Flag             = "AdvFlt_B_" .. idx,
+        Callback         = function(v)
+            entry.brainrot = (v and #v > 0) and v or nil
+        end,
+    })
+
+    local mutationDropdown = AdvFiltersSection:Dropdown({
+        Title     = "Mutation",
+        Values    = advMutList,
+        Multi     = true,
+        AllowNone = true,
+        Value     = {"Any"},
+        Flag      = "AdvFlt_M_" .. idx,
+        Callback  = function(v)
+            entry.mutation = (v and #v > 0) and v or {"Any"}
+        end,
+    })
+
+    MystrixHub.UIController.Drops.AdvancedFilters[idx] = {
+        Brainrot = brainrotDropdown,
+        Mutation = mutationDropdown,
+    }
+
+    MystrixHub.AdvancedFiltersController.TopDivider = AdvFiltersSection:Divider()
+
+    MystrixHub.AdvancedFiltersController.AddButton = AdvFiltersSection:Button({
+        Title    = "Add Another Filter",
+        Icon     = "plus-circle",
+        Callback = function()
+            task.spawn(function()
+                task.wait()
+                AddAdvancedFilterPair()
+            end)
+        end,
+    })
+end
+
+    AddAdvancedFilterPair()
+do
+    local _orig = MystrixHub.FarmController.IsConditionMet
+    MystrixHub.FarmController.IsConditionMet = function(attr)
+        if _orig(attr) then return true end
+
+        if MystrixHub.CPSFilterController and MystrixHub.CPSFilterController.MinCPS > 0 then
+            return false
+        end
+        if MystrixHub.WeatherMachineController.Running then return false end
+        if MystrixHub.AdvancedFiltersController.FilterCount == 0 then return false end
+        local parts = {}
+        for part in attr:gmatch("[^,]+") do
+            table.insert(parts, part:match("^%s*(.-)%s*$"))
+        end
+        local brainName = parts[1] or ""
+        local mutation  = parts[2] or "None"
+    
+
+        for _, entry in ipairs(MystrixHub.AdvancedFiltersController.Filters) do
+            if not entry.brainrot then continue end
+            local brainList = type(entry.brainrot) == "table" and entry.brainrot or {entry.brainrot}
+            local brainMatch = false
+            for _, b in ipairs(brainList) do
+                if b == brainName then
+                    brainMatch = true
+                    break
+                end
+            end
+            if brainMatch then
+                local mutList = type(entry.mutation) == "table" and entry.mutation or {entry.mutation}
+                local mutOk = false
+                for _, m in ipairs(mutList) do
+                    if m == "Any"
+                    or m == mutation
+                    or (m == "None" and (mutation == "" or mutation == "None" or not mutation))
+                    then
+                        mutOk = true
+                        break
+                    end
+                end
+                if mutOk then return true end
+            end
+        end
+        return false
+    end
+end
+
+local WeatherMachineSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
+    Title  = "Weather Machine",
+    Icon   = "cloud-lightning",
     Box    = true,
     Opened = true,
 })
 
-VolcanoSection:Toggle({
-    Title    = "Auto Farm Shards",
+MystrixHub.UIController.Drops.WMEvent = WeatherMachineSection:Dropdown({
+    Title     = "Event",
+    Values    = {"BACON", "Void", "FLOOD", "Phantom"},
+    Multi     = false,
+    AllowNone = true,
+    Flag      = "WMEvent",
+    Value     = nil,
+    Callback  = function(sel) MystrixHub.WeatherMachineController.SelectedEvent = sel end,
+})
+
+local allBrainrotsHighToLow = {}
+for _, rarity in ipairs({"Eternal","Celestial","OG","Hacked","Divine","Secret","Godly","Mythic","Legendary","Epic","Rare","Common"}) do
+    local names = MystrixHub.RarityData[rarity]
+    if names then
+        for _, name in ipairs(names) do table.insert(allBrainrotsHighToLow, name) end
+    end
+end
+
+MystrixHub.UIController.Drops.WMKeepBrainrots = WeatherMachineSection:Dropdown({
+    Title            = "Keep Brainrots",
+    Desc             = "Doesn't Skip Selected Brainrot(s) While Event Farming.",
+    Values           = allBrainrotsHighToLow,
+    Multi            = true,
+    AllowNone        = true,
+    Flag             = "WMKeepBrainrots",
+    Value            = {"None"},
+    Callback         = function(sel) MystrixHub.WeatherMachineController.KeepBrainrots = sel or {"None"} end,
+})
+
+WeatherMachineSection:Toggle({
+    Title    = "Auto Farm",
     Value    = false,
-    Flag     = "VolcanoAutoCollect",
+    Flag     = "WMAutoFarm",
     Callback = function(state)
-        MystrixHub.VolcanoController.AutoCollect = state
-
-        if state then
-            if MystrixHub.VolcanoController.Loop then
-                task.cancel(MystrixHub.VolcanoController.Loop)
-            end
-
-            MystrixHub.VolcanoController.Loop = task.spawn(function()
-                local volcanoActive   = false
-                local savedSettings   = {}
-                local wasAlreadyFarming = false
-
-                while MystrixHub.VolcanoController.AutoCollect do
-                    local isVolcano = WeatherService.Events and WeatherService.Events.Volcano
-
-                    if isVolcano and not volcanoActive then
-                        volcanoActive     = true
-                        wasAlreadyFarming = MystrixHub.FarmController.Running
-
-                        savedSettings = {
-                            Specific  = MystrixHub.FarmController.SelectedSpecific,
-                            Rarities  = MystrixHub.FarmController.SelectedRarities,
-                            Mutations = MystrixHub.FarmController.SelectedMutations,
-                        }
-
-                        -- Keep every brainrot for the whole event
-                        MystrixHub.FarmController.SelectedSpecific  = {}
-                        MystrixHub.FarmController.SelectedRarities  = MystrixHub.RarityOrder
-                        MystrixHub.FarmController.SelectedMutations = {"Any"}
-                        MystrixHub.FarmController.CollectShards     = true
-
-                        -- Standalone mode: start farm ourselves
-                        if not MystrixHub.FarmController.Running then
-                            MystrixHub.FarmController.Start()
-                            MystrixHub.VolcanoController.FarmStartedByUs = true
-                        end
-
-                        WindUI:Notify({
-                            Title    = "Volcano Event",
-                            Content  = "Started! Keeping all brainrots & sweeping shards.",
-                            Duration = 4,
-                            Icon     = "flame",
-                        })
-
-                    elseif not isVolcano and volcanoActive then
-                        volcanoActive = false
-                        MystrixHub.FarmController.CollectShards = false
-
-                        MystrixHub.FarmController.SelectedSpecific  = savedSettings.Specific  or {}
-                        MystrixHub.FarmController.SelectedRarities  = savedSettings.Rarities  or {}
-                        MystrixHub.FarmController.SelectedMutations = savedSettings.Mutations or {"Any"}
-
-                        if MystrixHub.VolcanoController.FarmStartedByUs and not wasAlreadyFarming then
-                            MystrixHub.FarmController.Stop()
-                            MystrixHub.VolcanoController.FarmStartedByUs = false
-                        end
-
-                        WindUI:Notify({
-                            Title    = "Volcano Event",
-                            Content  = "Ended. Farm settings restored.",
-                            Duration = 3,
-                            Icon     = "flame",
-                        })
-                    end
-
-                    task.wait(1)
-                end
-
-                -- Manual toggle off cleanup
-                if volcanoActive then
-                    MystrixHub.FarmController.CollectShards     = false
-                    MystrixHub.FarmController.SelectedSpecific  = savedSettings.Specific  or {}
-                    MystrixHub.FarmController.SelectedRarities  = savedSettings.Rarities  or {}
-                    MystrixHub.FarmController.SelectedMutations = savedSettings.Mutations or {"Any"}
-                    if MystrixHub.VolcanoController.FarmStartedByUs then
-                        MystrixHub.FarmController.Stop()
-                        MystrixHub.VolcanoController.FarmStartedByUs = false
-                    end
-                end
-            end)
-        else
-            MystrixHub.VolcanoController.AutoCollect = false
-            MystrixHub.FarmController.CollectShards  = false
-            if MystrixHub.VolcanoController.Loop then
-                task.cancel(MystrixHub.VolcanoController.Loop)
-                MystrixHub.VolcanoController.Loop = nil
-            end
-        end
+        if state then MystrixHub.WeatherMachineController.Start()
+        else MystrixHub.WeatherMachineController.Stop() end
     end,
 })
 
+local ActivateEventsSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
+    Title  = "Activate Events",
+    Icon   = "zap",
+    Box    = true,
+    Opened = true,
+})
 
--- Home Tab
+MystrixHub.UIController.Drops.ActivateEvents = ActivateEventsSection:Dropdown({
+    Title     = "Activate Events",
+    Values    = {"BACON", "Void", "FLOOD", "Phantom"},
+    Multi     = true,
+    AllowNone = true,
+    Flag      = "AEEvents",
+    Value     = {},
+    Callback  = function(sel) MystrixHub.ActivateEventsController.SelectedEvents = sel or {} end,
+})
+
+ActivateEventsSection:Toggle({
+    Title    = "Auto Activate",
+    Value    = false,
+    Flag     = "AEAutoActivate",
+    Callback = function(state)
+        MystrixHub.ActivateEventsController.AutoActivate = state
+        if state then MystrixHub.ActivateEventsController.Start()
+        else MystrixHub.ActivateEventsController.Stop() end
+    end,
+})
 if MystrixHub.Meta.MemberCount == "Fetching..." then task.wait(1.5) end
 
 MystrixHub.UIController.Tabs.Home:Section({ Title = "Discord", Icon = "geist:logo-discord", Box = true, Opened = true }):Paragraph({
@@ -3035,7 +4288,7 @@ end)
 
 MystrixHub.UIController.Tabs.Home:Section({ Title = "Update", Icon = "solar:moon-fog-outline", Box = true, Opened = true }):Paragraph({
     Title   = "UPDATED — " .. MystrixHub.Meta.Version,
-    Desc    = "-> Auto Favourite Brainrots\n-> Bug Fixes",
+    Desc    = "-> UPON KEY EXPIRATION, YOU WILL BE KICKED!\n-> Inventory Webhook\n-> Event Webhook",
     Locked  = false,
     Buttons = {}
 })
@@ -3060,7 +4313,7 @@ function MystrixHub.Functions.SendWebhook(title, description, colorHex)
             title       = title,
             description = description,
             color       = colorHex or 0x6c63ff,
-            footer      = { text = LocalPlayer.Name },
+            footer      = { text = "Mystrix Hub " .. MystrixHub.Meta.Version .. " | " .. LocalPlayer.Name },
             timestamp   = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         }},
     }
@@ -3071,6 +4324,251 @@ function MystrixHub.Functions.SendWebhook(title, description, colorHex)
     end)
 end
 
+function MystrixHub.Functions.SendInventoryWebhook()
+    local url = MystrixHub.WebhookController.URL
+    if not url or url == "" then
+        WindUI:Notify({ Title = "Inventory Webhook", Content = "Set a webhook URL in Setup first!", Duration = 3, Icon = "alert-circle" })
+        return
+    end
+
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return end
+
+    local ok1, EntitiesData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.Data.EntitiesData)
+    end)
+    local ok2, MutationData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.Data.MutationData)
+    end)
+
+    local toolData = {}
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            if ok1 and EntitiesData and not (EntitiesData.Brainrots and EntitiesData.Brainrots[tool.Name]) then
+                continue
+            end
+            local rarity = MystrixHub.Functions.GetRarityOfBrainrot(tool.Name) or "Unknown"
+            if rarity == "Unknown" then continue end
+            local mutation = tool:GetAttribute("Mutation")
+                or tool:GetAttribute("MutationType")
+                or tool:GetAttribute("Mut")
+                or "None"
+            if mutation == "" then mutation = "None" end
+            local cpsVal = 0
+            if ok1 and ok2 then
+                cpsVal = MystrixHub.Functions.GetBrainrotCurrentCPS(tool.Name, mutation) or 0
+            end
+            table.insert(toolData, {
+                name     = tool.Name,
+                rarity   = rarity,
+                mutation = mutation,
+                cps      = cpsVal,
+            })
+        end
+    end
+
+    table.sort(toolData, function(a, b) return a.cps > b.cps end)
+
+    local keyOrder = {}
+    local keyMap   = {}
+
+    for _, t in ipairs(toolData) do
+        local cpsStr = MystrixHub.Functions.FormatCPSShort(t.cps)
+        local key    = t.name .. "|" .. t.rarity .. "|" .. t.mutation .. "|" .. cpsStr
+        if keyMap[key] then
+            keyMap[key].count = keyMap[key].count + 1
+        else
+            local entry = {
+                name     = t.name,
+                rarity   = t.rarity,
+                mutation = t.mutation,
+                cpsStr   = cpsStr,
+                count    = 1,
+            }
+            keyMap[key] = entry
+            table.insert(keyOrder, entry)
+        end
+    end
+
+    local allLines = {}
+    for _, entry in ipairs(keyOrder) do
+        local line
+        if entry.count > 1 then
+            line = string.format("- **[%s] %s x%d** | %s | %s/s",
+                entry.rarity, entry.name, entry.count, entry.mutation, entry.cpsStr)
+        else
+            line = string.format("- **[%s] %s** | %s | %s/s",
+                entry.rarity, entry.name, entry.mutation, entry.cpsStr)
+        end
+        table.insert(allLines, line)
+    end
+
+    local CHAR_LIMIT = 4000
+    local headerText = "**Brainrots:**\n"
+    local totalChars = #headerText
+    local usedLines  = {}
+    local remaining  = 0
+
+    for i, line in ipairs(allLines) do
+        local addition   = line .. "\n"
+        local leftover   = #allLines - i
+        local moreSuffix = leftover > 0 and ("... and " .. leftover .. " more") or ""
+        local projected  = totalChars + #addition + #moreSuffix
+
+        if projected <= CHAR_LIMIT then
+            totalChars = totalChars + #addition
+            table.insert(usedLines, line)
+        else
+            remaining = #allLines - #usedLines
+            break
+        end
+    end
+
+    local desc = headerText
+    for _, line in ipairs(usedLines) do
+        desc = desc .. line .. "\n"
+    end
+    if remaining > 0 then
+        desc = desc .. "\n... and " .. remaining .. " more"
+    end
+
+    local totalCount = #toolData
+    local payload = {
+        username = "Mystrix Hub",
+        content  = "@everyone",
+        embeds   = {{
+            title       = "Backpack Summary — " .. totalCount .. " Brainrots",
+            description = desc,
+            color       = 0x6c63ff,
+            footer      = { text = "Mystrix Hub " .. MystrixHub.Meta.Version .. " | " .. LocalPlayer.Name },
+            timestamp   = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        }}
+    }
+
+    local okEnc, body = pcall(HttpService.JSONEncode, HttpService, payload)
+    if not okEnc or not body then return end
+
+    MystrixHub.Functions.MakeRawRequest(url, "POST", { ["Content-Type"] = "application/json" }, body)
+end
+
+function MystrixHub.Functions.SendWebhook(title, desc, color)
+    local url = MystrixHub.WebhookController.URL
+    if not url or url == "" then return end
+    local payload = {
+        username = "Mystrix Hub",
+        content  = "@everyone",
+        embeds   = {{
+            title       = title,
+            description = desc,
+            color       = color or 0x6c63ff,
+            footer      = { text = "Mystrix Hub " .. MystrixHub.Meta.Version .. " | " .. LocalPlayer.Name },
+            timestamp   = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        }}
+    }
+    local ok, body = pcall(HttpService.JSONEncode, HttpService, payload)
+    if not ok or not body then return end
+    MystrixHub.Functions.MakeRawRequest(url, "POST", { ["Content-Type"] = "application/json" }, body)
+end
+
+function MystrixHub.Functions.SendWeatherEventsWebhook()
+    local url = MystrixHub.WebhookController.URL
+    if not url or url == "" then
+        WindUI:Notify({ Title = "Weather Events Webhook", Content = "Set a webhook URL in Setup first!", Duration = 3, Icon = "alert-circle" })
+        return
+    end
+
+    local ok, SacrificeData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+    end)
+    if not ok or not SacrificeData then
+        WindUI:Notify({ Title = "Weather Events Webhook", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
+        return
+    end
+
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+
+    -- Count owned brainrots
+    local ownedCounts = {}
+    if backpack then
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") then
+                ownedCounts[tool.Name] = (ownedCounts[tool.Name] or 0) + 1
+            end
+        end
+    end
+
+    local events = {"BACON", "Void", "FLOOD", "Phantom"}
+
+    local CHAR_LIMIT = 4000
+    local desc = ""
+    local remaining_events = 0
+
+    local eventBlocks = {}
+
+    for _, eventName in ipairs(events) do
+        local recipe = SacrificeData.Recipes and SacrificeData.Recipes[eventName]
+        if not recipe or #recipe == 0 then continue end
+
+        local block = "**" .. eventName .. ":**\n"
+        for _, req in ipairs(recipe) do
+            if not req.Name or req.Name == "" then continue end
+            local rarity = MystrixHub.Functions.GetRarityOfBrainrot(req.Name) or "Unknown"
+            local owned  = ownedCounts[req.Name] or 0
+            block = block .. string.format("- **[%s] %s x%d**\n", rarity, req.Name, owned)
+        end
+
+        table.insert(eventBlocks, block)
+    end
+
+    -- Build description respecting char limit
+    local usedBlocks = {}
+    local totalChars = 0
+
+    for i, block in ipairs(eventBlocks) do
+        local leftover   = #eventBlocks - i
+        local moreSuffix = leftover > 0 and ("\n... and " .. leftover .. " more events") or ""
+        local projected  = totalChars + #block + (i < #eventBlocks and 1 or 0) + #moreSuffix
+
+        if projected <= CHAR_LIMIT then
+            totalChars = totalChars + #block + (i < #eventBlocks and 1 or 0)
+            table.insert(usedBlocks, block)
+        else
+            remaining_events = #eventBlocks - #usedBlocks
+            break
+        end
+    end
+
+    for i, block in ipairs(usedBlocks) do
+        desc = desc .. block
+        if i < #usedBlocks then desc = desc .. "\n" end
+    end
+    if remaining_events > 0 then
+        desc = desc .. "\n... and " .. remaining_events .. " more events"
+    end
+
+    if desc == "" then
+        WindUI:Notify({ Title = "Weather Events Webhook", Content = "No event recipe data found.", Duration = 3, Icon = "alert-circle" })
+        return
+    end
+
+    local payload = {
+        username = "Mystrix Hub",
+        content  = "@everyone",
+        embeds   = {{
+            title       = "Weather Events — " .. LocalPlayer.Name,
+            description = desc,
+            color       = 0x00d4ff,
+            footer      = { text = "Mystrix Hub " .. MystrixHub.Meta.Version .. " | " .. LocalPlayer.Name },
+            timestamp   = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        }}
+    }
+
+    local okEnc, body = pcall(HttpService.JSONEncode, HttpService, payload)
+    if not okEnc or not body then return end
+
+    MystrixHub.Functions.MakeRawRequest(url, "POST", { ["Content-Type"] = "application/json" }, body)
+end
 local WebhookSetup = MystrixHub.UIController.Tabs.Webhook:Section({ Title = "Setup", Icon = "link", Box = true, Opened = true })
 
 WebhookSetup:Input({
@@ -3106,24 +4604,25 @@ WebhookSetup:Toggle({
 
 local WebhookFilters = MystrixHub.UIController.Tabs.Webhook:Section({ Title = "Filters", Icon = "send-to-back", Box = true, Opened = true })
 
-WebhookFilters:Dropdown({
+MystrixHub.UIController.Drops.WebhookRarity = WebhookFilters:Dropdown({
     Title     = "Rarity",
     Values    = MystrixHub.RarityOrder1,
     Multi     = true,
     AllowNone = true,
-    Flag     = "WebhookRarity",
+    Flag      = "WebhookRarity",
     Value     = {},
     Callback  = function(sel) MystrixHub.WebhookController.SelectedRarities = sel or {} end,
 })
 
-WebhookFilters:Dropdown({
-    Title     = "Mutation",
-    Values    = {"Any","None","Golden","Diamond","Plasma","Radioactive","Molten","Void","Virus","Shadow","Electrified","Rainbow","Alien","Enchanted","Bacon","Wet","Astral","Phantom"},
-    Multi     = true,
-    AllowNone = true,
-    Flag     = "WebhookMutation",
-    Value     = {"Any"},
-    Callback  = function(sel) MystrixHub.WebhookController.SelectedMutations = sel or {} end,
+MystrixHub.UIController.Drops.WebhookMutation = WebhookFilters:Dropdown({
+    Title            = "Mutation",
+    Values           = MystrixHub.MutationController:GetList(),
+    Multi            = true,
+    AllowNone        = true,
+    SearchBarEnabled = true,
+    Flag             = "WebhookMutation",
+    Value            = {"Any"},
+    Callback         = function(sel) MystrixHub.WebhookController.SelectedMutations = sel or {} end,
 })
 
 local allBrainrotNames = {}
@@ -3136,14 +4635,133 @@ for _, rarity in ipairs(MystrixHub.RarityOrder) do
     end
 end
 
-WebhookFilters:Dropdown({
-    Title     = "Specific Brainrot",
-    Values    = allBrainrotNames,
-    Multi     = true,
-    AllowNone = true,
-    Flag     = "WebhookSpecific",
-    Value     = {},
-    Callback  = function(sel) MystrixHub.WebhookController.SelectedSpecific = sel or {} end,
+MystrixHub.UIController.Drops.WebhookSpecific = WebhookFilters:Dropdown({
+    Title            = "Specific Brainrot",
+    Values           = allBrainrotNames,
+    Multi            = true,
+    AllowNone        = true,
+    SearchBarEnabled = true,
+    Flag             = "WebhookSpecific",
+    Value            = {},
+    Callback         = function(sel) MystrixHub.WebhookController.SelectedSpecific = sel or {} end,
+})
+
+local InventorySection = MystrixHub.UIController.Tabs.Webhook:Section({
+    Title  = "Inventory",
+    Icon   = "backpack",
+    Box    = true,
+    Opened = true,
+})
+
+local InvHStack = InventorySection:HStack()
+local InvLeft   = InvHStack:VStack()
+local InvRight  = InvHStack:VStack()
+
+InvLeft:Button({
+    Title    = "Send",
+    Icon     = "send",
+    Callback = function()
+        task.spawn(function()
+            MystrixHub.Functions.SendInventoryWebhook()
+            WindUI:Notify({
+                Title    = "Inventory Webhook",
+                Content  = "Backpack summary sent!",
+                Duration = 2,
+                Icon     = "check-circle",
+            })
+        end)
+    end,
+})
+
+InvRight:Toggle({
+    Title    = "Auto Send",
+    Value    = false,
+    Flag     = "InvWebhookAuto",
+    Callback = function(state)
+        if state then
+            if MystrixHub.InventoryWebhookController.Running then return end
+            MystrixHub.InventoryWebhookController.Running = true
+            MystrixHub.InventoryWebhookController.Loop = task.spawn(function()
+                while MystrixHub.InventoryWebhookController.Running do
+                    if MystrixHub.WebhookController.URL and MystrixHub.WebhookController.URL ~= "" then
+                        MystrixHub.Functions.SendInventoryWebhook()
+                    end
+                    task.wait(MystrixHub.InventoryWebhookController.Delay * 60)
+                end
+            end)
+        else
+            MystrixHub.InventoryWebhookController.Running = false
+            if MystrixHub.InventoryWebhookController.Loop then
+                task.cancel(MystrixHub.InventoryWebhookController.Loop)
+                MystrixHub.InventoryWebhookController.Loop = nil
+            end
+        end
+    end,
+})
+
+
+
+local WeatherEventsWebhookSection = InventorySection:Section({
+    Title  = "Weather Events",
+    Icon   = "cloud-lightning",
+    Box    = true,
+    Opened = true,
+})
+
+local WEHStack = WeatherEventsWebhookSection:HStack()
+local WELeft   = WEHStack:VStack()
+local WERight  = WEHStack:VStack()
+
+WELeft:Button({
+    Title    = "Send",
+    Icon     = "send",
+    Callback = function()
+        task.spawn(function()
+            MystrixHub.Functions.SendWeatherEventsWebhook()
+            WindUI:Notify({
+                Title    = "Weather Events Webhook",
+                Content  = "Weather events summary sent!",
+                Duration = 2,
+                Icon     = "check-circle",
+            })
+        end)
+    end,
+})
+
+WERight:Toggle({
+    Title    = "Auto Send",
+    Value    = false,
+    Flag     = "WEWebhookAuto",
+    Callback = function(state)
+        if state then
+            if MystrixHub.InventoryWebhookController.Running then return end
+            MystrixHub.InventoryWebhookController.Running = true
+            MystrixHub.InventoryWebhookController.Loop = task.spawn(function()
+                while MystrixHub.InventoryWebhookController.Running do
+                    if MystrixHub.WebhookController.URL and MystrixHub.WebhookController.URL ~= "" then
+                        MystrixHub.Functions.SendWeatherEventsWebhook()
+                    end
+                    task.wait(MystrixHub.InventoryWebhookController.Delay * 60)
+                end
+            end)
+        else
+            MystrixHub.InventoryWebhookController.Running = false
+            if MystrixHub.InventoryWebhookController.Loop then
+                task.cancel(MystrixHub.InventoryWebhookController.Loop)
+                MystrixHub.InventoryWebhookController.Loop = nil
+            end
+        end
+    end,
+})
+
+InventorySection:Slider({
+    Title    = "Auto Send Delay (Minutes)",
+    Value    = { Min = 1, Max = 500, Default = 5 },
+    Step     = 1,
+    Flag     = "InvWebhookDelay",
+    Callback = function(value)
+        MystrixHub.InventoryWebhookController.Delay = value
+    end,
 })
 
 local TradeNetwork = ReplicatedStorage:WaitForChild("Shared")
@@ -3319,7 +4937,7 @@ local SelectedPlayerParagraph = SendGiftSection:Paragraph({
     Image = "",
 })
 
-local TradePlayerDropdown = SendGiftSection:Dropdown({
+MystrixHub.UIController.Drops.TradePlayer = SendGiftSection:Dropdown({
     Title     = "Select Player",
     Values    = RefreshPlayerDropdown(),
     Multi     = false,
@@ -3330,11 +4948,7 @@ local TradePlayerDropdown = SendGiftSection:Dropdown({
         MystrixHub.GiftController.TargetUserId = uid
         if uid then
             local ok, icon = pcall(function()
-                return Players:GetUserThumbnailAsync(
-                    uid,
-                    Enum.ThumbnailType.HeadShot,
-                    Enum.ThumbnailSize.Size420x420
-                )
+                return Players:GetUserThumbnailAsync(uid, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
             end)
             SelectedPlayerParagraph:SetTitle(displayName)
             SelectedPlayerParagraph:SetDesc("UserID: " .. uid)
@@ -3349,35 +4963,36 @@ local TradePlayerDropdown = SendGiftSection:Dropdown({
 
 Players.PlayerAdded:Connect(function()
     task.wait(0.1)
-    TradePlayerDropdown:Refresh(RefreshPlayerDropdown())
+    if MystrixHub.UIController.Drops.TradePlayer then
+        MystrixHub.UIController.Drops.TradePlayer:Refresh(RefreshPlayerDropdown())
+    end
 end)
 Players.PlayerRemoving:Connect(function()
     task.wait(0.1)
-    TradePlayerDropdown:Refresh(RefreshPlayerDropdown())
+    if MystrixHub.UIController.Drops.TradePlayer then
+        MystrixHub.UIController.Drops.TradePlayer:Refresh(RefreshPlayerDropdown())
+    end
 end)
 
-SendGiftSection:Dropdown({
+MystrixHub.UIController.Drops.GiftRarity = SendGiftSection:Dropdown({
     Title     = "Rarity",
     Values    = {"Eternal","Celestial","OG","Hacked","Divine","Secret","Godly","Mythic","Legendary","Epic","Rare","Common"},
     Multi     = true,
     AllowNone = true,
     Flag      = "GiftRarity",
     Value     = {},
-    Callback  = function(sel)
-        MystrixHub.GiftController.SelectedRarities = sel or {}
-    end,
+    Callback  = function(sel) MystrixHub.GiftController.SelectedRarities = sel or {} end,
 })
 
-SendGiftSection:Dropdown({
-    Title     = "Mutation Filter",
-    Values    = {"Any","None","Golden","Diamond","Plasma","Radioactive","Molten","Void","Virus","Shadow","Electrified","Rainbow","Alien","Enchanted","Bacon","Wet","Astral","Phantom"},
-    Multi     = true,
-    AllowNone = true,
-    Flag      = "GiftMutation",
-    Value     = {"Any"},
-    Callback  = function(sel)
-        MystrixHub.GiftController.SelectedMutations = sel or {"Any"}
-    end,
+MystrixHub.UIController.Drops.GiftMutation = SendGiftSection:Dropdown({
+    Title            = "Mutation Filter",
+    Values           = MystrixHub.MutationController:GetList(),
+    Multi            = true,
+    AllowNone        = true,
+    Flag             = "GiftMutation",
+    SearchBarEnabled = true,
+    Value            = {"Any"},
+    Callback         = function(sel) MystrixHub.GiftController.SelectedMutations = sel or {"Any"} end,
 })
 
 local giftSpecificValues = {}
@@ -3390,16 +5005,15 @@ for _, rarity in ipairs({"Eternal","Celestial","OG","Hacked","Divine","Secret","
     end
 end
 
-SendGiftSection:Dropdown({
-    Title     = "Specific Brainrots",
-    Values    = giftSpecificValues,
-    Multi     = true,
-    AllowNone = true,
-    Flag      = "GiftSpecific",
-    Value     = {},
-    Callback  = function(sel)
-        MystrixHub.GiftController.SelectedSpecific = sel or {}
-    end,
+MystrixHub.UIController.Drops.GiftSpecific = SendGiftSection:Dropdown({
+    Title            = "Specific Brainrots",
+    Values           = giftSpecificValues,
+    Multi            = true,
+    AllowNone        = true,
+    SearchBarEnabled = true,
+    Flag             = "GiftSpecific",
+    Value            = {},
+    Callback         = function(sel) MystrixHub.GiftController.SelectedSpecific = sel or {} end,
 })
 
 local function GiftMutationOk(tool)
@@ -3558,18 +5172,283 @@ SendGiftSection:Toggle({
     end,
 })
 
--- Settings Tab
+local TradeAmountSection = SendGiftSection:Section({
+    Title = "Trade Specific Amount",
+    Icon = "hash",
+    Box = true,
+    Opened = true,
+})
+
+TradeAmountSection:Slider({
+    Title = "Amount",
+    Value = { Min = 1, Max = 1000, Default = 10 },
+    Step = 1,
+    Flag = "TradeAmountSlider",
+    Callback = function(value)
+        _G.TradeAmountValue = value
+    end,
+})
+
+
+local function WaitForDebounce()
+    local MAX_WAIT = 12
+    local waited = 0
+    while workspace:GetServerTimeNow() < MystrixHub.GiftController.DebounceExpiry do
+        local remaining = MystrixHub.GiftController.DebounceExpiry - workspace:GetServerTimeNow()
+        if remaining <= 0 then break end
+        task.wait(math.min(remaining + 0.1, 0.2))
+        waited = waited + 0.2
+        if waited >= MAX_WAIT then break end
+    end
+    task.wait(0.15)
+end
+
+
+local function GetTradableToolsList()
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return {} end
+
+    local hasSpecific = #MystrixHub.GiftController.SelectedSpecific > 0
+    local hasRarity   = #MystrixHub.GiftController.SelectedRarities > 0
+    local results = {}
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and not tool:GetAttribute("TradeLocked") then
+            if not GiftMutationOk(tool) then continue end
+            if hasSpecific then
+                local toolRarity = MystrixHub.Functions.GetRarityOfBrainrot(tool.Name)
+                local display = toolRarity and ("[" .. toolRarity .. "] " .. tool.Name) or tool.Name
+                if table.find(MystrixHub.GiftController.SelectedSpecific, display) then
+                    table.insert(results, tool)
+                end
+            elseif hasRarity then
+                local rarity = MystrixHub.Functions.GetRarityOfBrainrot(tool.Name)
+                if rarity and table.find(MystrixHub.GiftController.SelectedRarities, rarity) then
+                    table.insert(results, tool)
+                end
+            end
+        end
+    end
+    return results
+end
+
+
+local function SendTradeBatch(targetId, itemsBatch, batchNumber, totalBatches)
+    if not targetId or #itemsBatch == 0 then return false end
+
+    MystrixHub.GiftController.DebounceExpiry = 0
+
+
+    pcall(function()
+        TradeNetwork:WaitForChild("ref_trade_r"):InvokeServer(targetId)
+    end)
+
+    local tradeStarted = false
+    local startConn
+    startConn = TradeNetwork:WaitForChild("rev_trade_s").OnClientEvent:Connect(function(status)
+        if status == "Trading" then
+            tradeStarted = true
+        end
+    end)
+    local t0 = tick()
+    while not tradeStarted and tick() - t0 < 20 do
+        task.wait(0.2)
+    end
+    startConn:Disconnect()
+    if not tradeStarted then return false end
+
+    task.wait(0.4)
+
+
+    for _, tool in ipairs(itemsBatch) do
+        local guid = tool:GetAttribute("GUID")
+        if guid then
+            task.wait(0.3)
+            pcall(function()
+                TradeNetwork:WaitForChild("rev_trade_i"):FireServer("AddItem", guid)
+            end)
+        end
+    end
+
+    task.wait(5.1)
+
+
+    pcall(function() TradeNetwork:WaitForChild("rev_trade_i"):FireServer("Confirm") end)
+    WindUI:Notify({
+        Title = "Trade Batch",
+        Content = string.format("Batch %d/%d - Round 1 confirmed!", batchNumber, totalBatches),
+        Duration = 2,
+        Icon = "check-circle"
+    })
+
+
+    local finalArrived = false
+    local finalConn
+    finalConn = TradeNetwork:WaitForChild("rev_trade_u").OnClientEvent:Connect(function(data)
+        if data and data.Stage == "Final" then
+            finalArrived = true
+        end
+    end)
+    local tradeCancelled = false
+    local cancelConn = TradeNetwork:WaitForChild("rev_trade_s").OnClientEvent:Connect(function(status)
+        if status == "Cancelled" then tradeCancelled = true end
+    end)
+
+    local waitStart = tick()
+    while not finalArrived and not tradeCancelled and tick() - waitStart < 60 do
+        task.wait(0.2)
+    end
+    finalConn:Disconnect()
+    cancelConn:Disconnect()
+
+    if finalArrived and not tradeCancelled then
+        task.wait(5.1)
+        pcall(function() TradeNetwork:WaitForChild("rev_trade_i"):FireServer("Confirm") end)
+        WindUI:Notify({
+            Title = "Trade Batch",
+            Content = string.format("Batch %d/%d - Final confirmed!", batchNumber, totalBatches),
+            Duration = 2,
+            Icon = "check-circle"
+        })
+
+
+        local tradeEnded = false
+        local endConn
+        endConn = TradeNetwork:WaitForChild("rev_trade_s").OnClientEvent:Connect(function(status)
+            if status == "Cancelled" then
+                tradeEnded = true
+                MystrixHub.GiftController.InTrade = false
+            end
+        end)
+        local endStart = tick()
+        while not tradeEnded and tick() - endStart < 30 do
+            task.wait(0.2)
+        end
+        endConn:Disconnect()
+        WaitForDebounce()
+        task.wait(1.5)
+        return true
+    else
+
+
+        local endConn2
+        endConn2 = TradeNetwork:WaitForChild("rev_trade_s").OnClientEvent:Connect(function(status)
+            if status == "Cancelled" then
+                MystrixHub.GiftController.InTrade = false
+            end
+        end)
+        task.wait(2)
+        endConn2:Disconnect()
+        WaitForDebounce()
+        task.wait(1)
+        return false
+    end
+end
+
+
+TradeAmountSection:Button({
+    Title = "Trade",
+    Icon = "send",
+    Callback = function()
+        task.spawn(function()
+            local targetId = MystrixHub.GiftController.TargetUserId
+            if not targetId then
+                WindUI:Notify({ Title = "Trade Specific", Content = "Select a target player first!", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            local amount = _G.TradeAmountValue or 10
+            if amount < 1 then amount = 1 end
+
+            local allTools = GetTradableToolsList()
+            if #allTools == 0 then
+                WindUI:Notify({ Title = "Trade Specific", Content = "No brainrots match your filters!", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            local toSend = {}
+            for i = 1, math.min(amount, #allTools) do
+                table.insert(toSend, allTools[i])
+            end
+
+            if #toSend == 0 then
+                WindUI:Notify({ Title = "Trade Specific", Content = "Not enough brainrots available.", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            WindUI:Notify({
+                Title = "Trade Specific",
+                Content = string.format("Sending %d brainrot(s) in batches of up to 10...", #toSend),
+                Duration = 3,
+                Icon = "loader-2"
+            })
+
+            local batches = {}
+            local currentBatch = {}
+            for i, tool in ipairs(toSend) do
+                table.insert(currentBatch, tool)
+                if #currentBatch == 10 then
+                    table.insert(batches, currentBatch)
+                    currentBatch = {}
+                end
+            end
+            if #currentBatch > 0 then
+                table.insert(batches, currentBatch)
+            end
+
+            local totalBatches = #batches
+            local sent = 0
+
+            for idx, batchItems in ipairs(batches) do
+
+
+                while MystrixHub.GiftController.InTrade do
+                    task.wait(0.5)
+                end
+
+                local success = SendTradeBatch(targetId, batchItems, idx, totalBatches)
+                if success then
+                    sent = sent + #batchItems
+                    WindUI:Notify({
+                        Title = "Trade Specific",
+                        Content = string.format("Batch %d/%d done (%d total sent)", idx, totalBatches, sent),
+                        Duration = 2,
+                        Icon = "check-circle"
+                    })
+                else
+                    WindUI:Notify({
+                        Title = "Trade Specific",
+                        Content = string.format("Batch %d failed. Stopping.", idx),
+                        Duration = 3,
+                        Icon = "alert-circle"
+                    })
+                    break
+                end
+
+                task.wait(0.5)
+            end
+
+            WindUI:Notify({
+                Title = "Trade Specific",
+                Content = string.format("Finished! Sent %d of %d brainrot(s).", sent, #toSend),
+                Duration = 4,
+                Icon = sent == #toSend and "check-circle" or "alert-circle"
+            })
+        end)
+    end,
+})
+
 local SettingsHStack = MystrixHub.UIController.Tabs.Settings:HStack()
 local LeftVStack     = SettingsHStack:VStack()
 local RightVStack    = SettingsHStack:VStack()
 
 local AppearanceSection = LeftVStack:Section({ Title = "Appearance", Icon = "palette", Box = true, Opened = true })
 
-AppearanceSection:Dropdown({
+MystrixHub.UIController.Drops.Theme = AppearanceSection:Dropdown({
     Title    = "Theme",
     Icon     = "swatchbook",
     Values   = {"Sky","Dark","Light","Rose","Plant","Red","Indigo","Violet","Amber","Emerald","Midnight","Crimson","Mellowsi","Monokai Pro","Cotton Candy","Rainbow"},
-    Value    = "Dark",
+    Value    = "Crimson",
     Flag     = "UI_Theme",
     Callback = function(theme)
         WindUI:SetTheme(theme)
@@ -3744,156 +5623,8 @@ MiscSection:Toggle({
     end,
 })
 
-local ConfigSection = RightVStack:Section({ Title = "Config", Icon = "save", Box = true, Opened = true })
 
-ConfigSection:Input({
-    Title       = "Config Name",
-    Icon        = "pencil",
-    Placeholder = "MystrixHub",
-    Callback    = function(value)
-        MystrixHub.ConfigController.NameInput = (value and value ~= "") and value or "MystrixHub"
-    end
-})
-
-ConfigSection:Button({
-    Title    = "Save Config",
-    Icon     = "save",
-    Callback = function()
-        task.spawn(function()
-            local configToSave = MystrixHub.ConfigController.GetConfig(MystrixHub.ConfigController.NameInput)
-            local ok, err = pcall(function() configToSave:Save() end)
-            if ok then MystrixHub.ConfigController.SaveLastConfigName(MystrixHub.ConfigController.NameInput) end
-            WindUI:Notify({
-                Title    = ok and "Config Saved" or "Save Failed",
-                Content  = ok and ("Saved as: " .. MystrixHub.ConfigController.NameInput) or tostring(err),
-                Duration = 3,
-                Icon     = ok and "check-circle" or "alert-circle",
-            })
-            if ok and MystrixHub.ConfigController.Dropdown then
-                MystrixHub.ConfigController.Dropdown:Refresh(MystrixHub.ConfigController.GetAllConfigNames())
-            end
-        end)
-    end
-})
-
-ConfigSection:Divider()
-
-local initialConfigs = MystrixHub.ConfigController.GetAllConfigNames()
-
-MystrixHub.ConfigController.Dropdown = ConfigSection:Dropdown({
-    Title    = "Select Config",
-    Icon     = "folder-open",
-    Values   = initialConfigs,
-    Multi    = false,
-    Value    = initialConfigs[1] or "No configs found",
-    Callback = function(value)
-        MystrixHub.ConfigController.SelectedConfig = (value ~= "No configs found") and value or nil
-    end
-})
-
-ConfigSection:Button({
-    Title    = "Refresh Config List",
-    Icon     = "refresh-cw",
-    Callback = function()
-        MystrixHub.ConfigController.Dropdown:Refresh(MystrixHub.ConfigController.GetAllConfigNames())
-        WindUI:Notify({ Title = "Refreshed", Content = "Config list has been updated!", Duration = 2, Icon = "check-circle" })
-    end
-})
-
-ConfigSection:Button({
-    Title    = "Load Selected Config",
-    Icon     = "folder-open",
-    Callback = function()
-        if not MystrixHub.ConfigController.SelectedConfig then
-            WindUI:Notify({ Title = "No Config Selected", Content = "Please select a config from the dropdown first!", Duration = 3, Icon = "alert-circle" })
-            return
-        end
-        WindUI:Notify({ Title = "Loading Config", Content = "Loading: " .. MystrixHub.ConfigController.SelectedConfig .. ", please wait...", Duration = 3, Icon = "loader-2" })
-        task.spawn(function()
-            local configToLoad = MystrixHub.ConfigController.GetConfig(MystrixHub.ConfigController.SelectedConfig)
-            local ok, err = pcall(function() configToLoad:Load() end)
-            if ok then MystrixHub.ConfigController.SaveLastConfigName(MystrixHub.ConfigController.SelectedConfig) end
-            WindUI:Notify({
-                Title    = ok and "Config Loaded" or "Load Failed",
-                Content  = ok and ("Loaded: " .. MystrixHub.ConfigController.SelectedConfig) or tostring(err),
-                Duration = 3,
-                Icon     = ok and "check-circle" or "alert-circle",
-            })
-        end)
-    end
-})
-
-ConfigSection:Button({
-    Title    = "Delete Selected Config",
-    Icon     = "trash-2",
-    Callback = function()
-        if not MystrixHub.ConfigController.SelectedConfig then
-            WindUI:Notify({ Title = "No Config Selected", Content = "Please select a config from the dropdown first!", Duration = 3, Icon = "alert-circle" })
-            return
-        end
-        task.spawn(function()
-            local configToDelete = MystrixHub.ConfigController.GetConfig(MystrixHub.ConfigController.SelectedConfig)
-            local ok, err = pcall(function() configToDelete:Delete() end)
-            WindUI:Notify({
-                Title    = ok and "Config Deleted" or "Delete Failed",
-                Content  = ok and ("Deleted: " .. MystrixHub.ConfigController.SelectedConfig) or tostring(err),
-                Duration = 3,
-                Icon     = ok and "check-circle" or "alert-circle",
-            })
-            if ok then
-                MystrixHub.ConfigController.Cache[MystrixHub.ConfigController.SelectedConfig] = nil
-                local lastConfig = MystrixHub.ConfigController.LoadLastConfigName()
-                if lastConfig == MystrixHub.ConfigController.SelectedConfig then
-                    pcall(function() if writefile then writefile(MystrixHub.ConfigController.LastConfigFile, "") end end)
-                end
-                MystrixHub.ConfigController.SelectedConfig = nil
-                MystrixHub.ConfigController.Dropdown:Refresh(MystrixHub.ConfigController.GetAllConfigNames())
-            end
-        end)
-    end
-})
-
-ConfigSection:Divider()
-
-ConfigSection:Toggle({
-    Title    = "Enable Auto Load",
-    Value    = MystrixHub.ConfigController.GetAutoLoadSetting(),
-    Flag     = "AutoLoad_Config",
-    Callback = function(value)
-        MystrixHub.ConfigController.SetAutoLoadSetting(value)
-        WindUI:Notify({
-            Title    = "Auto Load " .. (value and "Enabled" or "Disabled"),
-            Content  = value and "Last config will load on execute." or "Auto load turned off",
-            Duration = 2,
-            Icon     = value and "check-circle" or "info",
-        })
-    end
-})
-
-ConfigSection:Button({
-    Title    = "Load Last Config",
-    Icon     = "folder-open",
-    Callback = function()
-        local lastConfig = MystrixHub.ConfigController.LoadLastConfigName()
-        if not lastConfig or lastConfig == "" then
-            WindUI:Notify({ Title = "No Last Config", Content = "You haven't saved any config yet.", Duration = 3, Icon = "alert-circle" })
-            return
-        end
-        WindUI:Notify({ Title = "Loading Last Config", Content = "Loading: " .. lastConfig .. "...", Duration = 2, Icon = "loader-2" })
-        task.spawn(function()
-            local configToLoad = MystrixHub.ConfigController.GetConfig(lastConfig)
-            local ok, err = pcall(function() configToLoad:Load() end)
-            if ok then MystrixHub.ConfigController.SaveLastConfigName(lastConfig) end
-            WindUI:Notify({
-                Title    = ok and "Config Loaded" or "Load Failed",
-                Content  = ok and ("Loaded: " .. lastConfig) or tostring(err),
-                Duration = 3,
-                Icon     = ok and "check-circle" or "alert-circle",
-            })
-        end)
-    end
-})
-local PerformanceSection = RightVStack:Section({ Title = "Performance", Icon = "cpu", Box = true, Opened = true })
+local PerformanceSection = LeftVStack:Section({ Title = "Performance", Icon = "cpu", Box = true, Opened = true })
 
 PerformanceSection:Toggle({
     Title    = "Hide Players",
@@ -4144,6 +5875,323 @@ PerformanceSection:Button({
 
         screenGui:Destroy()
     end
+})
+
+local ConfigSection = RightVStack:Section({ Title = "Config", Icon = "save", Box = true, Opened = true })
+
+ConfigSection:Input({
+    Title       = "Config Name",
+    Icon        = "pencil",
+    Placeholder = "MystrixHub",
+    Callback    = function(value)
+        MystrixHub.ConfigController.NameInput = (value and value ~= "") and value or "MystrixHub"
+    end
+})
+
+ConfigSection:Button({
+    Title    = "Save Config",
+    Icon     = "save",
+    Callback = function()
+        task.spawn(function()
+            local configToSave = MystrixHub.ConfigController.GetConfig(MystrixHub.ConfigController.NameInput)
+            local ok, err = pcall(function() configToSave:Save() end)
+            if ok then MystrixHub.ConfigController.SaveLastConfigName(MystrixHub.ConfigController.NameInput) end
+            WindUI:Notify({
+                Title    = ok and "Config Saved" or "Save Failed",
+                Content  = ok and ("Saved as: " .. MystrixHub.ConfigController.NameInput) or tostring(err),
+                Duration = 3,
+                Icon     = ok and "check-circle" or "alert-circle",
+            })
+            if ok and MystrixHub.ConfigController.Dropdown then
+                MystrixHub.ConfigController.Dropdown:Refresh(MystrixHub.ConfigController.GetAllConfigNames())
+            end
+        end)
+    end
+})
+
+ConfigSection:Divider()
+
+local initialConfigs = MystrixHub.ConfigController.GetAllConfigNames()
+
+MystrixHub.ConfigController.Dropdown = ConfigSection:Dropdown({
+    Title    = "Select Config",
+    Icon     = "folder-open",
+    Values   = initialConfigs,
+    Multi    = false,
+    Value    = initialConfigs[1] or "No configs found",
+    Callback = function(value)
+        MystrixHub.ConfigController.SelectedConfig = (value ~= "No configs found") and value or nil
+    end
+})
+
+ConfigSection:Button({
+    Title    = "Refresh Config List",
+    Icon     = "refresh-cw",
+    Callback = function()
+        MystrixHub.ConfigController.Dropdown:Refresh(MystrixHub.ConfigController.GetAllConfigNames())
+        WindUI:Notify({ Title = "Refreshed", Content = "Config list has been updated!", Duration = 2, Icon = "check-circle" })
+    end
+})
+
+ConfigSection:Button({
+    Title    = "Load Selected Config",
+    Icon     = "folder-open",
+    Callback = function()
+        if not MystrixHub.ConfigController.SelectedConfig then
+            WindUI:Notify({ Title = "No Config Selected", Content = "Please select a config from the dropdown first!", Duration = 3, Icon = "alert-circle" })
+            return
+        end
+        WindUI:Notify({ Title = "Loading Config", Content = "Loading: " .. MystrixHub.ConfigController.SelectedConfig .. ", please wait...", Duration = 3, Icon = "loader-2" })
+        task.spawn(function()
+            local configToLoad = MystrixHub.ConfigController.GetConfig(MystrixHub.ConfigController.SelectedConfig)
+            local ok, err = pcall(function() configToLoad:Load() end)
+if ok then
+    task.wait(0.1)
+    MystrixHub.Functions.SyncDropdownsToState()
+    MystrixHub.ConfigController.SaveLastConfigName(MystrixHub.ConfigController.SelectedConfig)
+end
+            WindUI:Notify({
+                Title    = ok and "Config Loaded" or "Load Failed",
+                Content  = ok and ("Loaded: " .. MystrixHub.ConfigController.SelectedConfig) or tostring(err),
+                Duration = 3,
+                Icon     = ok and "check-circle" or "alert-circle",
+            })
+        end)
+    end
+})
+
+ConfigSection:Button({
+    Title    = "Delete Selected Config",
+    Icon     = "trash-2",
+    Callback = function()
+        if not MystrixHub.ConfigController.SelectedConfig then
+            WindUI:Notify({ Title = "No Config Selected", Content = "Please select a config from the dropdown first!", Duration = 3, Icon = "alert-circle" })
+            return
+        end
+        task.spawn(function()
+            local configToDelete = MystrixHub.ConfigController.GetConfig(MystrixHub.ConfigController.SelectedConfig)
+            local ok, err = pcall(function() configToDelete:Delete() end)
+            WindUI:Notify({
+                Title    = ok and "Config Deleted" or "Delete Failed",
+                Content  = ok and ("Deleted: " .. MystrixHub.ConfigController.SelectedConfig) or tostring(err),
+                Duration = 3,
+                Icon     = ok and "check-circle" or "alert-circle",
+            })
+            if ok then
+                MystrixHub.ConfigController.Cache[MystrixHub.ConfigController.SelectedConfig] = nil
+                local lastConfig = MystrixHub.ConfigController.LoadLastConfigName()
+                if lastConfig == MystrixHub.ConfigController.SelectedConfig then
+                    pcall(function() if writefile then writefile(MystrixHub.ConfigController.LastConfigFile, "") end end)
+                end
+                MystrixHub.ConfigController.SelectedConfig = nil
+                MystrixHub.ConfigController.Dropdown:Refresh(MystrixHub.ConfigController.GetAllConfigNames())
+            end
+        end)
+    end
+})
+
+ConfigSection:Divider()
+
+ConfigSection:Toggle({
+    Title    = "Enable Auto Load",
+    Value    = MystrixHub.ConfigController.GetAutoLoadSetting(),
+    Flag     = "AutoLoad_Config",
+    Callback = function(value)
+        MystrixHub.ConfigController.SetAutoLoadSetting(value)
+        WindUI:Notify({
+            Title    = "Auto Load " .. (value and "Enabled" or "Disabled"),
+            Content  = value and "Last config will load on execute." or "Auto load turned off",
+            Duration = 2,
+            Icon     = value and "check-circle" or "info",
+        })
+    end
+})
+
+ConfigSection:Button({
+    Title    = "Load Last Config",
+    Icon     = "folder-open",
+    Callback = function()
+        local lastConfig = MystrixHub.ConfigController.LoadLastConfigName()
+        if not lastConfig or lastConfig == "" then
+            WindUI:Notify({ Title = "No Last Config", Content = "You haven't saved any config yet.", Duration = 3, Icon = "alert-circle" })
+            return
+        end
+        WindUI:Notify({ Title = "Loading Last Config", Content = "Loading: " .. lastConfig .. "...", Duration = 2, Icon = "loader-2" })
+        task.spawn(function()
+            local configToLoad = MystrixHub.ConfigController.GetConfig(lastConfig)
+local ok, err = pcall(function() configToLoad:Load() end)
+if ok then
+    task.wait(0.1)
+    MystrixHub.Functions.SyncDropdownsToState()
+    MystrixHub.ConfigController.SaveLastConfigName(lastConfig)
+end
+            WindUI:Notify({
+                Title    = ok and "Config Loaded" or "Load Failed",
+                Content  = ok and ("Loaded: " .. lastConfig) or tostring(err),
+                Duration = 3,
+                Icon     = ok and "check-circle" or "alert-circle",
+            })
+        end)
+    end
+})
+
+ConfigSection:Divider()
+
+ConfigSection:Button({
+    Title    = "Export Config",
+    Icon     = "upload",
+    Callback = function()
+        task.spawn(function()
+            local configName = MystrixHub.ConfigController.SelectedConfig
+            if not configName or configName == "" or configName == "No configs found" then
+                WindUI:Notify({ Title = "Export Failed", Content = "Please select a config from the dropdown first!", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            local configPath = MystrixHub.Meta.FolderPath .. "/Config/" .. configName .. ".json"
+            local fallbackPath = MystrixHub.Meta.FolderPath .. "/Configs/" .. configName .. ".json"
+            
+            local filePath = nil
+            if isfile and isfile(configPath) then
+                filePath = configPath
+            elseif isfile and isfile(fallbackPath) then
+                filePath = fallbackPath
+            else
+                local ok, content = pcall(readfile, configPath)
+                if ok and content and content ~= "" then
+                    filePath = configPath
+                else
+                    local ok2, content2 = pcall(readfile, fallbackPath)
+                    if ok2 and content2 and content2 ~= "" then
+                        filePath = fallbackPath
+                    end
+                end
+            end
+
+            if not filePath then
+                WindUI:Notify({ Title = "Export Failed", Content = "Config file not found. Make sure you've saved it at least once.", Duration = 4, Icon = "alert-circle" })
+                return
+            end
+
+            local raw = nil
+            local ok, content = pcall(readfile, filePath)
+            if ok and content and content ~= "" then
+                raw = content
+            end
+
+            if not raw then
+                WindUI:Notify({ Title = "Export Failed", Content = "Could not read config file content.", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            local validOk = pcall(function() return HttpService:JSONDecode(raw) end)
+            if not validOk then
+                WindUI:Notify({ Title = "Export Failed", Content = "Config file is corrupt or invalid JSON.", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            local encoded = HttpService:JSONEncode({
+                mhub = true,
+                v    = MystrixHub.Meta.Version,
+                name = configName,
+                data = raw,
+            })
+
+            if setclipboard then
+                setclipboard(encoded)
+                WindUI:Notify({
+                    Title    = "Config Exported!",
+                    Content  = "'" .. configName .. "' copied to clipboard.",
+                    Duration = 4,
+                    Icon     = "clipboard-check",
+                })
+            else
+                WindUI:Notify({ Title = "No Clipboard", Content = "Your executor does not support setclipboard().", Duration = 3, Icon = "alert-circle" })
+            end
+        end)
+    end,
+})
+
+
+ConfigSection:Input({
+    Title       = "Import Config",
+    Icon        = "clipboard",
+    Placeholder = "Paste exported config string here...",
+    Flag        = "ImportConfigInput",
+    Callback    = function(value)
+        MystrixHub.ConfigController.ImportData = value or ""
+    end,
+})
+ConfigSection:Button({
+    Title    = "Import Config",
+    Icon     = "download",
+    Callback = function()
+        task.spawn(function()
+            local raw = MystrixHub.ConfigController.ImportData or ""
+            if raw == "" then
+                WindUI:Notify({ Title = "Import Failed", Content = "Paste a config string into the input above first!", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            local ok, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+            if not ok or type(decoded) ~= "table" or not decoded.mhub or not decoded.data or not decoded.name then
+                WindUI:Notify({ Title = "Invalid Config", Content = "That doesn't look like a valid Mystrix Hub config!", Duration = 4, Icon = "alert-circle" })
+                return
+            end
+
+            local dataOk = pcall(function() return HttpService:JSONDecode(decoded.data) end)
+            if not dataOk then
+                WindUI:Notify({ Title = "Corrupt Config", Content = "Config data is malformed!", Duration = 4, Icon = "alert-circle" })
+                return
+            end
+
+            local configName = tostring(decoded.name)
+
+            pcall(function() makefolder("WindUI") end)
+            pcall(function() makefolder(MystrixHub.Meta.FolderPath) end)
+            local configDir = MystrixHub.Meta.FolderPath .. "/Config"
+            pcall(function() makefolder(configDir) end)
+
+            local writePath = configDir .. "/" .. configName .. ".json"
+            local writeOk = pcall(writefile, writePath, decoded.data)
+
+            if not writeOk then
+                WindUI:Notify({ Title = "Import Failed", Content = "Could not write config file to disk!", Duration = 3, Icon = "alert-circle" })
+                return
+            end
+
+            task.wait(0.5)
+
+            MystrixHub.ConfigController.Cache[configName] = nil
+
+            local config = MystrixHub.ConfigController.GetConfig(configName)
+            local loadOk, loadErr = pcall(function() config:Load() end)
+
+            if loadOk then
+                    task.wait(0.1)
+    MystrixHub.Functions.SyncDropdownsToState()
+                MystrixHub.ConfigController.SaveLastConfigName(configName)
+                pcall(function()
+                    MystrixHub.ConfigController.Dropdown:Refresh(MystrixHub.ConfigController.GetAllConfigNames())
+                    MystrixHub.ConfigController.Dropdown.Value = configName
+                    MystrixHub.ConfigController.SelectedConfig = configName
+                end)
+                WindUI:Notify({
+                    Title    = "Config Imported & Loaded!",
+                    Content  = "Successfully applied: " .. configName .. (decoded.v and (" [" .. decoded.v .. "]") or ""),
+                    Duration = 5,
+                    Icon     = "check-circle",
+                })
+            else
+                WindUI:Notify({
+                    Title    = "Import Failed to Apply",
+                    Content  = "File written but could not be loaded.\nError: " .. tostring(loadErr),
+                    Duration = 5,
+                    Icon     = "alert-circle",
+                })
+            end
+        end)
+    end,
 })
 
 if MystrixHub.Auth.KeyError == "HWID_RESET" then
