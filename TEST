@@ -4525,7 +4525,7 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         end
     end
 
-    local events = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
+    local events = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"}
 
     local CHAR_LIMIT = 4000
     local desc = ""
