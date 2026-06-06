@@ -1506,8 +1506,23 @@ if root and root.Parent then
                         local rawName   = LocalPlayer.Name
                         local hiddenName = #rawName <= 3 and rawName or rawName:sub(1, 3) .. "___"
                         local brainrotText = "[" .. mutation .. "] " .. toolName
--- NEW
-                        local thumbnailUrl = MystrixHub.Functions.GetBrainrotIcon(toolName) or ""
+                        local thumbnailUrl = ""
+                        pcall(function()
+                            local iconRaw = MystrixHub.Functions.GetBrainrotIcon(toolName) or ""
+                            local assetId = iconRaw:match("rbxassetid://(%d+)") or iconRaw:match("^(%d+)$")
+                            if assetId then
+                                local resp = MystrixHub.Functions.MakeRawRequest(
+                                    "https://thumbnails.roblox.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false",
+                                    "GET", {["Accept"] = "application/json"}, nil
+                                )
+                                if resp and resp.Body then
+                                    local ok, data = pcall(function() return HttpService:JSONDecode(resp.Body) end)
+                                    if ok and data and data.data and data.data[1] and data.data[1].imageUrl then
+                                        thumbnailUrl = data.data[1].imageUrl
+                                    end
+                                end
+                            end
+                        end)
 
                         local now = os.date("*t")
                         local hour12 = now.hour % 12
