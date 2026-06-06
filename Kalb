@@ -60,7 +60,6 @@ local request     = (syn and syn.request) or http_request or request
 makefolder("WindUI")
 makefolder(GAME_FOLDER_PATH)
 
--- ========== AUTO-FETCH GAME DATA FROM FILES ==========
 local _GameEntitiesData, _GameMutationData
 
 pcall(function()
@@ -70,7 +69,6 @@ pcall(function()
     _GameMutationData = require(game:GetService("ReplicatedStorage").Shared.Data.MutationData)
 end)
 
--- Rarity ORDER stays fixed (Exclusive → Common), contents come from game
 local _RARITY_ORDER = {
     "Exclusive","Eternal","Celestial","OG","Hacked","Divine",
     "Secret","Godly","Mythic","Legendary","Epic","Rare","Common",
@@ -88,7 +86,7 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
             if not _RarityData[rarity] then
                 _RarityData[rarity] = {}
                 if not table.find(_RARITY_ORDER, rarity) then
-                    -- Unknown new rarity → insert just before Common
+
                     local idx = table.find(_RARITY_ORDER, "Common") or #_RARITY_ORDER
                     table.insert(_RARITY_ORDER, idx, rarity)
                 end
@@ -96,19 +94,19 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
             table.insert(_RarityData[rarity], brainName)
         end
     end
-    -- Sort brainrots alphabetically within each rarity for consistency
+
     for _, names in pairs(_RarityData) do
         table.sort(names)
     end
 end
 
--- RarityOrder1 = full order minus Exclusive (used for webhooks/gifts)
+
 local _RARITY_ORDER1 = {}
 for _, r in ipairs(_RARITY_ORDER) do
     if r ~= "Exclusive" then table.insert(_RARITY_ORDER1, r) end
 end
 
--- Mutation list: Any first, then sorted by value desc, None last
+
 local _MutationList = {"Any"}
 if _GameMutationData and _GameMutationData.Buffs then
     local _muts = {}
@@ -126,7 +124,7 @@ if _GameMutationData and _GameMutationData.Buffs then
     end
 end
 table.insert(_MutationList, "None")
--- ========== END AUTO-FETCH ==========
+
 
 getgenv().MystrixHub = {
 
