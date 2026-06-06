@@ -60,7 +60,7 @@ local request     = (syn and syn.request) or http_request or request
 makefolder("WindUI")
 makefolder(GAME_FOLDER_PATH)
 
--- ========== AUTO-FETCH GAME DATA FROM FILES ==========
+
 local _GameEntitiesData, _GameMutationData
 
 pcall(function()
@@ -70,7 +70,7 @@ pcall(function()
     _GameMutationData = require(game:GetService("ReplicatedStorage").Shared.Data.MutationData)
 end)
 
--- Rarity ORDER stays fixed (Exclusive → Common), contents come from game
+
 local _RARITY_ORDER = {
     "Exclusive","Eternal","Celestial","OG","Hacked","Divine",
     "Secret","Godly","Mythic","Legendary","Epic","Rare","Common",
@@ -88,7 +88,7 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
             if not _RarityData[rarity] then
                 _RarityData[rarity] = {}
                 if not table.find(_RARITY_ORDER, rarity) then
-                    -- Unknown new rarity → insert just before Common
+
                     local idx = table.find(_RARITY_ORDER, "Common") or #_RARITY_ORDER
                     table.insert(_RARITY_ORDER, idx, rarity)
                 end
@@ -96,7 +96,7 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
             table.insert(_RarityData[rarity], brainName)
         end
     end
-    -- Sort brainrots alphabetically within each rarity for consistency
+
     for _, names in pairs(_RarityData) do
         table.sort(names, function(a, b)
             local function getCPS(n)
@@ -111,13 +111,13 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
     end
 end
 
--- RarityOrder1 = full order minus Exclusive (used for webhooks/gifts)
+
 local _RARITY_ORDER1 = {}
 for _, r in ipairs(_RARITY_ORDER) do
     if r ~= "Exclusive" then table.insert(_RARITY_ORDER1, r) end
 end
 
--- Mutation list: Any first, then sorted by value desc, None last
+
 local _MutationList = {"Any"}
 if _GameMutationData and _GameMutationData.Buffs then
     local _muts = {}
@@ -135,7 +135,7 @@ if _GameMutationData and _GameMutationData.Buffs then
     end
 end
 table.insert(_MutationList, "None")
--- ========== END AUTO-FETCH ==========
+
 
 getgenv().MystrixHub = {
 
@@ -277,7 +277,7 @@ WeatherMachineController = {
     Running        = false,
     Loop           = nil,
     StartedFarm    = false,
-Values = {"Enchanted", "Wet", "Alien", "Heavenly"},
+Values = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
     SavedSettings  = { Specific = {}, Rarities = {}, Mutations = {"Any"}, Percent = 1 },
 },
 
@@ -3637,7 +3637,7 @@ local autoKickRarityPower = {
     Hacked    = 50000000,
     OG        = 250000000,
     Celestial = 2000000000,
-    Eternal   = 3000000000,
+    Eternal   = 11000000000,
 }
 
 local autoKickRarityOrderHighToLow = {
@@ -3969,7 +3969,7 @@ BrainrotSection:Toggle({
                                 local percent
                                 if targetPower <= 0 then
                                     percent = 0
-                                elseif targetPower >= 5000000000 then
+                                elseif targetPower >= 15000000000 then
 
                                     percent = 1
                                 else
@@ -4206,7 +4206,7 @@ local WeatherMachineSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.WMEvent = WeatherMachineSection:Dropdown({
     Title     = "Event",
-    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
+    Values    = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
     Multi     = false,
     AllowNone = true,
     Flag      = "WMEvent",
@@ -4252,7 +4252,7 @@ local ActivateEventsSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.ActivateEvents = ActivateEventsSection:Dropdown({
     Title     = "Activate Events",
-    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
+    Values    = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
     Multi     = true,
     AllowNone = true,
     Flag      = "AEEvents",
@@ -4315,7 +4315,7 @@ end)
 
 MystrixHub.UIController.Tabs.Home:Section({ Title = "Update", Icon = "solar:moon-fog-outline", Box = true, Opened = true }):Paragraph({
     Title   = "UPDATED — " .. MystrixHub.Meta.Version,
-    Desc    = "-> UPON KEY EXPIRATION, YOU WILL BE KICKED!\n-> Inventory Webhook\n-> Event Webhook",
+    Desc    = "-> Fixed Dying On New Area\n-> New Weather Events\n-> Added All New Stuff",
     Locked  = false,
     Buttons = {}
 })
@@ -4525,7 +4525,7 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         end
     end
 
-    local events = {"Enchanted", "Wet", "Alien", "Heavenly"}
+    local events = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
 
     local CHAR_LIMIT = 4000
     local desc = ""
