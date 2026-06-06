@@ -31,7 +31,7 @@ local NEBULAUTH_BASE_URL       = "https://api.nebulauth.com"
 local NEBULAUTH_API_TOKEN      = "mk_at_mqRNTHJ9GG0Xc7A1pWPb_OoCpshPMW-OSymq1encWnk"
 local NEBULAUTH_SIGNING_SECRET = "mk_sig_0GCXObajBi8W5Sv4PjJkvrieyXBOAiwehA-iD94OMHA"
 
-local CURRENT_VERSION  = "v3.4.3"
+local CURRENT_VERSION  = "v3.4.2"
 local DISCORD_INVITE   = "XV66VWqAaN"
 local HUB_LOGO         = "rbxassetid://85997568026025"
 local GAME_FOLDER_NAME = "MystrixHubKAL"
@@ -1061,13 +1061,10 @@ end
 
 function MystrixHub.FarmController.FlyPath(root, speedMultiplier)
     local path = {
+        Vector3.new(675, -7, 237),
         Vector3.new(675, 3, 237),
         Vector3.new(703, 3, 239)
     }
-    -- Snap to Y=3 before tweening to prevent jitter
-    if math.abs(root.Position.Y - 3) > 0.1 then
-        root.CFrame = CFrame.new(root.Position.X, 3, root.Position.Z)
-    end
     local baseSpeed = 20
     for _, target in ipairs(path) do
         local distance = (target - root.Position).Magnitude
@@ -1112,15 +1109,10 @@ function MystrixHub.FarmController.FixCamera()
 end
 
 function MystrixHub.FarmController.TweenTo(root, target)
-    -- Force target to Y=3
-    target = Vector3.new(target.X, 3, target.Z)
-    -- Snap to Y=3 before tweening to prevent jitter
-    if math.abs(root.Position.Y - 3) > 0.1 then
-        root.CFrame = CFrame.new(root.Position.X, 3, root.Position.Z)
-    end
     local char  = LocalPlayer.Character
     local hum   = char and char:FindFirstChildOfClass("Humanoid")
     local speed = hum and ((hum.WalkSpeed) + 99)
+
     local distance = (target - root.Position).Magnitude
     local duration = distance / speed
     if duration <= 0 then duration = 0.01 end
