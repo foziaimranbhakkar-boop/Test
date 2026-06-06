@@ -1061,17 +1061,10 @@ end
 
 function MystrixHub.FarmController.FlyPath(root, speedMultiplier)
     local path = {
-        Vector3.new(675, 10, 237),
-        Vector3.new(703, 10, 239)
+        Vector3.new(675, -7, 237),
+        Vector3.new(675, 3, 237),
+        Vector3.new(703, 3, 239)
     }
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-
-    -- Anchor + kill humanoid physics so nothing fights the tween
-    if hum then hum:ChangeState(Enum.HumanoidStateType.Physics) end
-    root.Anchored = true
-    root.CFrame = CFrame.new(root.Position.X, 10, root.Position.Z)
-
     local baseSpeed = 20
     for _, target in ipairs(path) do
         local distance = (target - root.Position).Magnitude
@@ -1085,9 +1078,6 @@ function MystrixHub.FarmController.FlyPath(root, speedMultiplier)
         tween:Play()
         tween.Completed:Wait()
     end
-
-    root.Anchored = false
-    if hum then hum:ChangeState(Enum.HumanoidStateType.Freefall) end
 end
 
 function MystrixHub.Functions.GetBrainrotIcon(name)
@@ -1119,21 +1109,13 @@ function MystrixHub.FarmController.FixCamera()
 end
 
 function MystrixHub.FarmController.TweenTo(root, target)
-    target = Vector3.new(target.X, 10, target.Z)
+    local char  = LocalPlayer.Character
+    local hum   = char and char:FindFirstChildOfClass("Humanoid")
+    local speed = hum and ((hum.WalkSpeed) + 99)
 
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-
-    -- Anchor + kill humanoid physics so nothing fights the tween
-    if hum then hum:ChangeState(Enum.HumanoidStateType.Physics) end
-    root.Anchored = true
-    root.CFrame = CFrame.new(root.Position.X, 10, root.Position.Z)
-
-    local speed = hum and (hum.WalkSpeed + 99) or 99
     local distance = (target - root.Position).Magnitude
     local duration = distance / speed
     if duration <= 0 then duration = 0.01 end
-
     local tween = TweenService:Create(
         root,
         TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
@@ -1141,9 +1123,6 @@ function MystrixHub.FarmController.TweenTo(root, target)
     )
     tween:Play()
     tween.Completed:Wait()
-
-    root.Anchored = false
-    if hum then hum:ChangeState(Enum.HumanoidStateType.Freefall) end
 end
 
 MystrixHub.FarmController.Start = function()
@@ -1220,7 +1199,7 @@ MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
                     lastPositionTime = tick()
                 end
 
-                MystrixHub.FarmController.TweenTo(root, Vector3.new(690, 10, 238))
+                MystrixHub.FarmController.TweenTo(root, Vector3.new(690, 3, 238))
                 task.wait(0.3)
 
 local currentPercent = 1
@@ -1311,7 +1290,7 @@ WindUI:Notify({
                     if not newRoot then return end
 
                     task.wait(0.03)
-                    newRoot.CFrame = CFrame.new(690, 10, 238)
+                    newRoot.CFrame = CFrame.new(690, 3, 238)
                     return
                 end
 
@@ -1380,63 +1359,71 @@ end
                 end
 
 
-                if root and root.Parent then
-           
-                    
-        
-                        local flyThread = task.spawn(function()
-            
-                            MystrixHub.FarmController.FlyPath(root, speedMult)
-       
+if root and root.Parent then
+
+                    -- If player spawned on the alternative side (X < -4401), route them in
+                    if root.Position.X < -4401 then
+                        -- Phase 1: tween along Y=13 until reaching X=-4401
+                        local preTarget = Vector3.new(-4401, 13, root.Position.Z)
+                        local preThread = task.spawn(function()
+                            local preHum  = char and char:FindFirstChildOfClass("Humanoid")
+                            local preSpd  = preHum and (preHum.WalkSpeed + 99) or 99
+                            local preDist = (preTarget - root.Position).Magnitude
+                            local preDur  = preDist / preSpd
+                            if preDur <= 0 then preDur = 0.01 end
+                            local preTween = TweenService:Create(
+                                root,
+                                TweenInfo.new(preDur, Enum.EasingStyle.Linear),
+                                { CFrame = CFrame.new(preTarget) }
+                            )
+                            preTween:Play()
+                            preTween.Completed:Wait()
                         end)
-        
-                        while coroutine.status(flyThread) ~= "dead" do
-           
+
+                        while coroutine.status(preThread) ~= "dead" do
                             if not root or not root.Parent or (LocalPlayer.Character ~= char) then
-            
-                                task.cancel(flyThread)
-             
+                                task.cancel(preThread)
                                 break
-          
                             end
-          
                             task.wait(0.1)
-       
                         end
 
-   
-                    char = LocalPlayer.Character
-    
-                    if not char or char ~= root.Parent then
-       
-                        lastPosition = nil
-       
-                        return
-   
+                        -- Safety check after pre-tween
+                        if not root or not root.Parent or LocalPlayer.Character ~= char then
+                            lastPosition = nil
+                            return
+                        end
+
+                        -- Phase 2: instant teleport to the entry point of the normal path
+                        root.CFrame = CFrame.new(-4351, -7, 230)
                     end
-  
+
+                    -- Normal FlyPath from here (unchanged for both cases)
+                    local flyThread = task.spawn(function()
+                        MystrixHub.FarmController.FlyPath(root, speedMult)
+                    end)
+
+                    while coroutine.status(flyThread) ~= "dead" do
+                        if not root or not root.Parent or (LocalPlayer.Character ~= char) then
+                            task.cancel(flyThread)
+                            break
+                        end
+                        task.wait(0.1)
+                    end
+
+                    char = LocalPlayer.Character
+
+                    if not char or char ~= root.Parent then
+                        lastPosition = nil
+                        return
+                    end
+
                     root = char:WaitForChild("HumanoidRootPart", 10)
-    
                     if not root then return end
 
                 end
 
-task.wait(1)
-
-                -- Always unanchor before collecting, in case tween was cancelled mid-flight
-                pcall(function()
-                    local safeChar = LocalPlayer.Character
-                    local safeRoot = safeChar and safeChar:FindFirstChild("HumanoidRootPart")
-                    local safeHum  = safeChar and safeChar:FindFirstChildOfClass("Humanoid")
-                    if safeRoot and safeRoot.Anchored then
-                        safeRoot.Anchored = false
-                    end
-                    if safeHum then
-                        safeHum:ChangeState(Enum.HumanoidStateType.Freefall)
-                    end
-                end)
-
-                task.wait(0.2)
+                task.wait(1)
 
                 if MystrixHub.FarmController.KickCollectRemote and MystrixHub.FarmController.OriginalKickCollect then
                     pcall(function()
