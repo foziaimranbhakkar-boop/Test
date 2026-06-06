@@ -31,7 +31,7 @@ local NEBULAUTH_BASE_URL       = "https://api.nebulauth.com"
 local NEBULAUTH_API_TOKEN      = "mk_at_mqRNTHJ9GG0Xc7A1pWPb_OoCpshPMW-OSymq1encWnk"
 local NEBULAUTH_SIGNING_SECRET = "mk_sig_0GCXObajBi8W5Sv4PjJkvrieyXBOAiwehA-iD94OMHA"
 
-local CURRENT_VERSION  = "v3.4.2"
+local CURRENT_VERSION  = "v3.5"
 local DISCORD_INVITE   = "XV66VWqAaN"
 local HUB_LOGO         = "rbxassetid://85997568026025"
 local GAME_FOLDER_NAME = "MystrixHubKAL"
@@ -60,7 +60,7 @@ local request     = (syn and syn.request) or http_request or request
 makefolder("WindUI")
 makefolder(GAME_FOLDER_PATH)
 
--- ========== AUTO-FETCH GAME DATA FROM FILES ==========
+
 local _GameEntitiesData, _GameMutationData
 
 pcall(function()
@@ -70,7 +70,7 @@ pcall(function()
     _GameMutationData = require(game:GetService("ReplicatedStorage").Shared.Data.MutationData)
 end)
 
--- Rarity ORDER stays fixed (Exclusive → Common), contents come from game
+
 local _RARITY_ORDER = {
     "Exclusive","Eternal","Celestial","OG","Hacked","Divine",
     "Secret","Godly","Mythic","Legendary","Epic","Rare","Common",
@@ -88,7 +88,7 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
             if not _RarityData[rarity] then
                 _RarityData[rarity] = {}
                 if not table.find(_RARITY_ORDER, rarity) then
-                    -- Unknown new rarity → insert just before Common
+
                     local idx = table.find(_RARITY_ORDER, "Common") or #_RARITY_ORDER
                     table.insert(_RARITY_ORDER, idx, rarity)
                 end
@@ -96,19 +96,28 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
             table.insert(_RarityData[rarity], brainName)
         end
     end
-    -- Sort brainrots alphabetically within each rarity for consistency
+
     for _, names in pairs(_RarityData) do
-        table.sort(names)
+        table.sort(names, function(a, b)
+            local function getCPS(n)
+                if not _GameEntitiesData or not _GameEntitiesData.Brainrots then return 0 end
+                local br = _GameEntitiesData.Brainrots[n]
+                if not br or not br.CPS then return 0 end
+                local ok, val = pcall(function() return br.CPS:Reverse() end)
+                return (ok and val) or 0
+            end
+            return getCPS(a) > getCPS(b)
+        end)
     end
 end
 
--- RarityOrder1 = full order minus Exclusive (used for webhooks/gifts)
+
 local _RARITY_ORDER1 = {}
 for _, r in ipairs(_RARITY_ORDER) do
     if r ~= "Exclusive" then table.insert(_RARITY_ORDER1, r) end
 end
 
--- Mutation list: Any first, then sorted by value desc, None last
+
 local _MutationList = {"Any"}
 if _GameMutationData and _GameMutationData.Buffs then
     local _muts = {}
@@ -126,7 +135,7 @@ if _GameMutationData and _GameMutationData.Buffs then
     end
 end
 table.insert(_MutationList, "None")
--- ========== END AUTO-FETCH ==========
+
 
 getgenv().MystrixHub = {
 
@@ -226,16 +235,18 @@ getgenv().MystrixHub = {
     RarityData = _RarityData,
     RarityOrder = _RARITY_ORDER,
     RarityOrder1 = _RARITY_ORDER1,
+
     WeightNames = {
-        "Giant Gold Star Barbell","Neon Pulse","Mega Golden Barbell","Heaven Plate",
-        "Golden Barbell","Donut Barbell","Ice Barbell","Iron Plate","Copper Plate",
-        "Stone Block","Bone Barbell","Wooden Stick",
+        "Planet Barbell","Emerald Barbell","Giant Gold Star Barbell","Neon Pulse",
+        "Mega Golden Barbell","Heaven Plate","Golden Barbell","Donut Barbell",
+        "Ice Barbell","Iron Plate","Copper Plate","Stone Block","Bone Barbell","Wooden Stick",
     },
 
     WeightsBestOrder = {
         "Wooden Stick","Bone Barbell","Stone Block","Copper Plate","Iron Plate",
         "Ice Barbell","Donut Barbell","Golden Barbell","Heaven Plate",
         "Mega Golden Barbell","Neon Pulse","Giant Gold Star Barbell",
+        "Emerald Barbell","Planet Barbell",
     },
 
     CoinsController = {
@@ -266,7 +277,7 @@ WeatherMachineController = {
     Running        = false,
     Loop           = nil,
     StartedFarm    = false,
-Values = {"BACON", "Void", "FLOOD", "Phantom"},
+Values = {"Enchanted", "Wet", "Alien", "Heavenly"},
     SavedSettings  = { Specific = {}, Rarities = {}, Mutations = {"Any"}, Percent = 1 },
 },
 
@@ -1359,43 +1370,61 @@ end
                 end
 
 
-                if root and root.Parent then
-           
-                    
-        
-                        local flyThread = task.spawn(function()
-            
-                            MystrixHub.FarmController.FlyPath(root, speedMult)
-       
+if root and root.Parent then
+
+                    if root.Position.X < -4401 then
+                        local preTarget = Vector3.new(-4401, 13, root.Position.Z)
+                        local preThread = task.spawn(function()
+                            local preHum  = char and char:FindFirstChildOfClass("Humanoid")
+                            local preSpd  = preHum and (preHum.WalkSpeed + 99) or 99
+                            local preDist = (preTarget - root.Position).Magnitude
+                            local preDur  = preDist / preSpd
+                            if preDur <= 0 then preDur = 0.01 end
+                            local preTween = TweenService:Create(
+                                root,
+                                TweenInfo.new(preDur, Enum.EasingStyle.Linear),
+                                { CFrame = CFrame.new(preTarget) }
+                            )
+                            preTween:Play()
+                            preTween.Completed:Wait()
                         end)
-        
-                        while coroutine.status(flyThread) ~= "dead" do
-           
+
+                        while coroutine.status(preThread) ~= "dead" do
                             if not root or not root.Parent or (LocalPlayer.Character ~= char) then
-            
-                                task.cancel(flyThread)
-             
+                                task.cancel(preThread)
                                 break
-          
                             end
-          
                             task.wait(0.1)
-       
                         end
 
-   
-                    char = LocalPlayer.Character
-    
-                    if not char or char ~= root.Parent then
-       
-                        lastPosition = nil
-       
-                        return
-   
+                        if not root or not root.Parent or LocalPlayer.Character ~= char then
+                            lastPosition = nil
+                            return
+                        end
+
+                        root.CFrame = CFrame.new(-4351, -7, 230)
                     end
-  
+
+                    local flyThread = task.spawn(function()
+                        MystrixHub.FarmController.FlyPath(root, speedMult)
+                    end)
+
+                    while coroutine.status(flyThread) ~= "dead" do
+                        if not root or not root.Parent or (LocalPlayer.Character ~= char) then
+                            task.cancel(flyThread)
+                            break
+                        end
+                        task.wait(0.1)
+                    end
+
+                    char = LocalPlayer.Character
+
+                    if not char or char ~= root.Parent then
+                        lastPosition = nil
+                        return
+                    end
+
                     root = char:WaitForChild("HumanoidRootPart", 10)
-    
                     if not root then return end
 
                 end
@@ -1477,26 +1506,24 @@ end
                         local rawName   = LocalPlayer.Name
                         local hiddenName = #rawName <= 3 and rawName or rawName:sub(1, 3) .. "___"
                         local brainrotText = "[" .. mutation .. "] " .. toolName
-                                                local specialThumbnails = {
-                            -- Celestial
-                            ["Anpali Babel"]             = "https://tr.rbxcdn.com/180DAY-e3f6aa0c430140ba4e57af449dc70965/420/420/Image/Png/noFilter",
-                            ["Beluga Beluga"]            = "https://tr.rbxcdn.com/180DAY-ab78c43bfae36fa40f5e7e37781972fa/420/420/Image/Png/noFilter",
-                            ["Chicleteira Bicicleteira"] = "https://tr.rbxcdn.com/180DAY-6267bdc376a99b477843401d4fbb6cd4/420/420/Image/Png/noFilter",
-                            ["Dragonfrutina Dolphinita"] = "https://tr.rbxcdn.com/180DAY-37099ae4184253e6f7a885d97854b01e/420/420/Image/Png/noFilter",
-                            ["Guerriro Digitale"]        = "https://tr.rbxcdn.com/180DAY-9cfa0542ffff6115778bf78a39783adc/420/420/Image/Png/noFilter",
-                            ["Ketupat Kepat"]            = "https://tr.rbxcdn.com/180DAY-72992a0f8afb731a6e911fdb45be4cf2/420/420/Image/Png/noFilter",
-                            ["Krupuk Pagi Pagi"]         = "https://tr.rbxcdn.com/180DAY-a9bebd55ddd4e356080f0681f19d52a2/420/420/Image/Png/noFilter",
-                            ["Mastodontico Telepiedone"] = "https://tr.rbxcdn.com/180DAY-01b3d59d80cf5efaafb3a7141d2b3cbc/420/420/Image/Png/noFilter",
-                            ["Pot Hotspot"]              = "https://tr.rbxcdn.com/180DAY-d36eb8f14bffba5f355bbe477c2ad2b4/420/420/Image/Png/noFilter",
-                            ["Tralaledon"]              = "https://tr.rbxcdn.com/180DAY-53e54bb2826227a97dd429859f828aed/420/420/Image/Png/noFilter",
-                            -- Eternal
-                            ["Kicky"]                    = "https://tr.rbxcdn.com/180DAY-3d80803bd1067e1581aaf41bfdb3742d/420/420/Image/Png/noFilter",
-                            ["Baba Yaga"]                = "https://tr.rbxcdn.com/180DAY-8a842a46e446b294446a868d28923bed/420/420/Image/Png/noFilter",
-                            ["Astro Tim"]                = "https://tr.rbxcdn.com/180DAY-deaf64ff70760d7a26e68932b520daf4/420/420/Image/Png/noFilter",
-                            ["Professora 67"]            = "https://tr.rbxcdn.com/180DAY-e49c2c0f88dc5be0b33ed57246f40662/420/420/Image/Png/noFilter",
-                        }
-                        local thumbnailUrl = specialThumbnails[toolName]
-                            or "https://tr.rbxcdn.com/180DAY-72992a0f8afb731a6e911fdb45be4cf2/420/420/Image/Png/noFilter"
+                        local thumbnailUrl = ""
+                        pcall(function()
+                            local iconRaw = MystrixHub.Functions.GetBrainrotIcon(toolName) or ""
+                            local assetId = iconRaw:match("rbxassetid://(%d+)") or iconRaw:match("^(%d+)$")
+                            if assetId then
+                                local resp = MystrixHub.Functions.MakeRawRequest(
+                                    "https://thumbnails.roblox.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false",
+                                    "GET", {["Accept"] = "application/json"}, nil
+                                )
+                                if resp and resp.Body then
+                                    local ok, data = pcall(function() return HttpService:JSONDecode(resp.Body) end)
+                                    if ok and data and data.data and data.data[1] and data.data[1].imageUrl then
+                                        thumbnailUrl = data.data[1].imageUrl
+                                    end
+                                end
+                            end
+                        end)
+
                         local now = os.date("*t")
                         local hour12 = now.hour % 12
                         if hour12 == 0 then hour12 = 12 end
@@ -4179,7 +4206,7 @@ local WeatherMachineSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.WMEvent = WeatherMachineSection:Dropdown({
     Title     = "Event",
-    Values    = {"BACON", "Void", "FLOOD", "Phantom"},
+    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
     Multi     = false,
     AllowNone = true,
     Flag      = "WMEvent",
@@ -4225,7 +4252,7 @@ local ActivateEventsSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.ActivateEvents = ActivateEventsSection:Dropdown({
     Title     = "Activate Events",
-    Values    = {"BACON", "Void", "FLOOD", "Phantom"},
+    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
     Multi     = true,
     AllowNone = true,
     Flag      = "AEEvents",
@@ -4288,7 +4315,7 @@ end)
 
 MystrixHub.UIController.Tabs.Home:Section({ Title = "Update", Icon = "solar:moon-fog-outline", Box = true, Opened = true }):Paragraph({
     Title   = "UPDATED — " .. MystrixHub.Meta.Version,
-    Desc    = "-> UPON KEY EXPIRATION, YOU WILL BE KICKED!\n-> Inventory Webhook\n-> Event Webhook",
+    Desc    = "-> Fixed Dying On New Area\n-> New Weather Events\n-> Added All New Stuff",
     Locked  = false,
     Buttons = {}
 })
@@ -4498,7 +4525,7 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         end
     end
 
-    local events = {"BACON", "Void", "FLOOD", "Phantom"}
+    local events = {"Enchanted", "Wet", "Alien", "Heavenly"}
 
     local CHAR_LIMIT = 4000
     local desc = ""
