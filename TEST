@@ -31,7 +31,7 @@ local NEBULAUTH_BASE_URL       = "https://api.nebulauth.com"
 local NEBULAUTH_API_TOKEN      = "mk_at_mqRNTHJ9GG0Xc7A1pWPb_OoCpshPMW-OSymq1encWnk"
 local NEBULAUTH_SIGNING_SECRET = "mk_sig_0GCXObajBi8W5Sv4PjJkvrieyXBOAiwehA-iD94OMHA"
 
-local CURRENT_VERSION  = "v3.4.2"
+local CURRENT_VERSION  = "v3.5"
 local DISCORD_INVITE   = "XV66VWqAaN"
 local HUB_LOGO         = "rbxassetid://85997568026025"
 local GAME_FOLDER_NAME = "MystrixHubKAL"
@@ -98,7 +98,16 @@ if _GameEntitiesData and _GameEntitiesData.Brainrots then
     end
     -- Sort brainrots alphabetically within each rarity for consistency
     for _, names in pairs(_RarityData) do
-        table.sort(names)
+        table.sort(names, function(a, b)
+            local function getCPS(n)
+                if not _GameEntitiesData or not _GameEntitiesData.Brainrots then return 0 end
+                local br = _GameEntitiesData.Brainrots[n]
+                if not br or not br.CPS then return 0 end
+                local ok, val = pcall(function() return br.CPS:Reverse() end)
+                return (ok and val) or 0
+            end
+            return getCPS(a) > getCPS(b)
+        end)
     end
 end
 
@@ -226,16 +235,18 @@ getgenv().MystrixHub = {
     RarityData = _RarityData,
     RarityOrder = _RARITY_ORDER,
     RarityOrder1 = _RARITY_ORDER1,
+
     WeightNames = {
-        "Giant Gold Star Barbell","Neon Pulse","Mega Golden Barbell","Heaven Plate",
-        "Golden Barbell","Donut Barbell","Ice Barbell","Iron Plate","Copper Plate",
-        "Stone Block","Bone Barbell","Wooden Stick",
+        "Planet Barbell","Emerald Barbell","Giant Gold Star Barbell","Neon Pulse",
+        "Mega Golden Barbell","Heaven Plate","Golden Barbell","Donut Barbell",
+        "Ice Barbell","Iron Plate","Copper Plate","Stone Block","Bone Barbell","Wooden Stick",
     },
 
     WeightsBestOrder = {
         "Wooden Stick","Bone Barbell","Stone Block","Copper Plate","Iron Plate",
         "Ice Barbell","Donut Barbell","Golden Barbell","Heaven Plate",
         "Mega Golden Barbell","Neon Pulse","Giant Gold Star Barbell",
+        "Emerald Barbell","Planet Barbell",
     },
 
     CoinsController = {
@@ -266,7 +277,7 @@ WeatherMachineController = {
     Running        = false,
     Loop           = nil,
     StartedFarm    = false,
-Values = {"BACON", "Void", "FLOOD", "Phantom"},
+Values = {"Enchanted", "Wet", "Alien", "Heavenly"},
     SavedSettings  = { Specific = {}, Rarities = {}, Mutations = {"Any"}, Percent = 1 },
 },
 
@@ -1361,9 +1372,7 @@ end
 
 if root and root.Parent then
 
-                    -- If player spawned on the alternative side (X < -4401), route them in
                     if root.Position.X < -4401 then
-                        -- Phase 1: tween along Y=13 until reaching X=-4401
                         local preTarget = Vector3.new(-4401, 13, root.Position.Z)
                         local preThread = task.spawn(function()
                             local preHum  = char and char:FindFirstChildOfClass("Humanoid")
@@ -1388,17 +1397,14 @@ if root and root.Parent then
                             task.wait(0.1)
                         end
 
-                        -- Safety check after pre-tween
                         if not root or not root.Parent or LocalPlayer.Character ~= char then
                             lastPosition = nil
                             return
                         end
 
-                        -- Phase 2: instant teleport to the entry point of the normal path
                         root.CFrame = CFrame.new(-4351, -7, 230)
                     end
 
-                    -- Normal FlyPath from here (unchanged for both cases)
                     local flyThread = task.spawn(function()
                         MystrixHub.FarmController.FlyPath(root, speedMult)
                     end)
@@ -1500,26 +1506,9 @@ if root and root.Parent then
                         local rawName   = LocalPlayer.Name
                         local hiddenName = #rawName <= 3 and rawName or rawName:sub(1, 3) .. "___"
                         local brainrotText = "[" .. mutation .. "] " .. toolName
-                                                local specialThumbnails = {
-                            -- Celestial
-                            ["Anpali Babel"]             = "https://tr.rbxcdn.com/180DAY-e3f6aa0c430140ba4e57af449dc70965/420/420/Image/Png/noFilter",
-                            ["Beluga Beluga"]            = "https://tr.rbxcdn.com/180DAY-ab78c43bfae36fa40f5e7e37781972fa/420/420/Image/Png/noFilter",
-                            ["Chicleteira Bicicleteira"] = "https://tr.rbxcdn.com/180DAY-6267bdc376a99b477843401d4fbb6cd4/420/420/Image/Png/noFilter",
-                            ["Dragonfrutina Dolphinita"] = "https://tr.rbxcdn.com/180DAY-37099ae4184253e6f7a885d97854b01e/420/420/Image/Png/noFilter",
-                            ["Guerriro Digitale"]        = "https://tr.rbxcdn.com/180DAY-9cfa0542ffff6115778bf78a39783adc/420/420/Image/Png/noFilter",
-                            ["Ketupat Kepat"]            = "https://tr.rbxcdn.com/180DAY-72992a0f8afb731a6e911fdb45be4cf2/420/420/Image/Png/noFilter",
-                            ["Krupuk Pagi Pagi"]         = "https://tr.rbxcdn.com/180DAY-a9bebd55ddd4e356080f0681f19d52a2/420/420/Image/Png/noFilter",
-                            ["Mastodontico Telepiedone"] = "https://tr.rbxcdn.com/180DAY-01b3d59d80cf5efaafb3a7141d2b3cbc/420/420/Image/Png/noFilter",
-                            ["Pot Hotspot"]              = "https://tr.rbxcdn.com/180DAY-d36eb8f14bffba5f355bbe477c2ad2b4/420/420/Image/Png/noFilter",
-                            ["Tralaledon"]              = "https://tr.rbxcdn.com/180DAY-53e54bb2826227a97dd429859f828aed/420/420/Image/Png/noFilter",
-                            -- Eternal
-                            ["Kicky"]                    = "https://tr.rbxcdn.com/180DAY-3d80803bd1067e1581aaf41bfdb3742d/420/420/Image/Png/noFilter",
-                            ["Baba Yaga"]                = "https://tr.rbxcdn.com/180DAY-8a842a46e446b294446a868d28923bed/420/420/Image/Png/noFilter",
-                            ["Astro Tim"]                = "https://tr.rbxcdn.com/180DAY-deaf64ff70760d7a26e68932b520daf4/420/420/Image/Png/noFilter",
-                            ["Professora 67"]            = "https://tr.rbxcdn.com/180DAY-e49c2c0f88dc5be0b33ed57246f40662/420/420/Image/Png/noFilter",
-                        }
-                        local thumbnailUrl = specialThumbnails[toolName]
-                            or "https://tr.rbxcdn.com/180DAY-72992a0f8afb731a6e911fdb45be4cf2/420/420/Image/Png/noFilter"
+-- NEW
+                        local thumbnailUrl = MystrixHub.Functions.GetBrainrotIcon(toolName) or ""
+
                         local now = os.date("*t")
                         local hour12 = now.hour % 12
                         if hour12 == 0 then hour12 = 12 end
@@ -4202,7 +4191,7 @@ local WeatherMachineSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.WMEvent = WeatherMachineSection:Dropdown({
     Title     = "Event",
-    Values    = {"BACON", "Void", "FLOOD", "Phantom"},
+    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
     Multi     = false,
     AllowNone = true,
     Flag      = "WMEvent",
@@ -4248,7 +4237,7 @@ local ActivateEventsSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.ActivateEvents = ActivateEventsSection:Dropdown({
     Title     = "Activate Events",
-    Values    = {"BACON", "Void", "FLOOD", "Phantom"},
+    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
     Multi     = true,
     AllowNone = true,
     Flag      = "AEEvents",
@@ -4521,7 +4510,7 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         end
     end
 
-    local events = {"BACON", "Void", "FLOOD", "Phantom"}
+    local events = {"Enchanted", "Wet", "Alien", "Heavenly"}
 
     local CHAR_LIMIT = 4000
     local desc = ""
