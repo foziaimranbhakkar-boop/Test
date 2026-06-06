@@ -3637,7 +3637,7 @@ local autoKickRarityPower = {
     Hacked    = 50000000,
     OG        = 250000000,
     Celestial = 2000000000,
-    Eternal   = 3000000000,
+    Eternal   = 11000000000,
 }
 
 local autoKickRarityOrderHighToLow = {
@@ -3969,7 +3969,7 @@ BrainrotSection:Toggle({
                                 local percent
                                 if targetPower <= 0 then
                                     percent = 0
-                                elseif targetPower >= 5000000000 then
+                                elseif targetPower >= 15000000000 then
 
                                     percent = 1
                                 else
