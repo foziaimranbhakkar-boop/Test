@@ -136,6 +136,23 @@ if _GameMutationData and _GameMutationData.Buffs then
 end
 table.insert(_MutationList, "None")
 
+local _GameSacrificeData
+pcall(function()
+    _GameSacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+end)
+
+local _WeatherEvents = {}
+if _GameSacrificeData and _GameSacrificeData.Recipes then
+    for eventName, recipe in pairs(_GameSacrificeData.Recipes) do
+        if type(recipe) == "table" and #recipe > 0 then
+            table.insert(_WeatherEvents, eventName)
+        end
+    end
+    table.sort(_WeatherEvents)
+end
+if #_WeatherEvents == 0 then
+    _WeatherEvents = {"Wet","Void","Bacon","Enchanted","Alien","Heavenly","Phantom"}
+end
 
 getgenv().MystrixHub = {
 
@@ -235,6 +252,7 @@ getgenv().MystrixHub = {
     RarityData = _RarityData,
     RarityOrder = _RARITY_ORDER,
     RarityOrder1 = _RARITY_ORDER1,
+    SacrificeData = _GameSacrificeData,
 
     WeightNames = {
         "Planet Barbell","Emerald Barbell","Giant Gold Star Barbell","Neon Pulse",
@@ -277,7 +295,7 @@ WeatherMachineController = {
     Running        = false,
     Loop           = nil,
     StartedFarm    = false,
-Values = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
+Values = _WeatherEvents,
     SavedSettings  = { Specific = {}, Rarities = {}, Mutations = {"Any"}, Percent = 1 },
 },
 
@@ -1429,7 +1447,7 @@ if root and root.Parent then
 
                 end
 
-                task.wait(1)
+                task.wait()
 
                 if MystrixHub.FarmController.KickCollectRemote and MystrixHub.FarmController.OriginalKickCollect then
                     pcall(function()
@@ -2134,7 +2152,6 @@ function MystrixHub.Functions.SyncDropdownsToState()
         MystrixHub.UIController.CurrentTheme = D.Theme.Value
     end
 
-    -- Advanced Filters (restore from dropdown values to entry tables)
     if MystrixHub.UIController.Drops.AdvancedFilters then
         for idx, drops in pairs(MystrixHub.UIController.Drops.AdvancedFilters) do
             local entry = MystrixHub.AdvancedFiltersController.Filters[idx]
@@ -3664,14 +3681,20 @@ MystrixHub.WeatherMachineController.Start = function()
         MystrixHub.WeatherMachineController.StartedFarm = true
     end
     MystrixHub.WeatherMachineController.Loop = task.spawn(function()
-        local ok, SacrificeData = pcall(function()
-            return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
-        end)
-        if not ok or not SacrificeData then
-            WindUI:Notify({ Title = "Weather Machine", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
-            MystrixHub.WeatherMachineController.Running = false
-            return
-        end
+local SacrificeData = MystrixHub.SacrificeData
+if not SacrificeData then
+    local ok
+    ok, SacrificeData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+    end)
+    if ok and SacrificeData then
+        MystrixHub.SacrificeData = SacrificeData
+    else
+        WindUI:Notify({ Title = "Weather Machine", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
+        MystrixHub.WeatherMachineController.Running = false
+        return
+    end
+end
         local recipe = SacrificeData.Recipes[event]
         if not recipe or #recipe == 0 then
             WindUI:Notify({ Title = "Weather Machine", Content = event .. " has no recipe data.", Duration = 3, Icon = "alert-circle" })
@@ -3787,7 +3810,13 @@ MystrixHub.ActivateEventsController.Start = function()
         task.cancel(MystrixHub.ActivateEventsController.Loop)
     end
     local SacrificeData
-    pcall(function() SacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData) end)
+    local SacrificeData = MystrixHub.SacrificeData
+if not SacrificeData then
+    pcall(function()
+        SacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+        if SacrificeData then MystrixHub.SacrificeData = SacrificeData end
+    end)
+end
     MystrixHub.ActivateEventsController.AutoActivate = true
     MystrixHub.ActivateEventsController.Loop = task.spawn(function()
         while MystrixHub.ActivateEventsController.AutoActivate do
@@ -4206,7 +4235,7 @@ local WeatherMachineSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.WMEvent = WeatherMachineSection:Dropdown({
     Title     = "Event",
-    Values    = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
+    Values = _WeatherEvents,
     Multi     = false,
     AllowNone = true,
     Flag      = "WMEvent",
@@ -4252,7 +4281,7 @@ local ActivateEventsSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.ActivateEvents = ActivateEventsSection:Dropdown({
     Title     = "Activate Events",
-    Values    = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"},
+    Values = _WeatherEvents,
     Multi     = true,
     AllowNone = true,
     Flag      = "AEEvents",
@@ -4505,17 +4534,19 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         return
     end
 
-    local ok, SacrificeData = pcall(function()
-        return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
-    end)
-    if not ok or not SacrificeData then
+    local SacrificeData = MystrixHub.SacrificeData
+    if not SacrificeData then
+        pcall(function()
+            SacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+            MystrixHub.SacrificeData = SacrificeData
+        end)
+    end
+    if not SacrificeData then
         WindUI:Notify({ Title = "Weather Events Webhook", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
         return
     end
 
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-
-    -- Count owned brainrots
     local ownedCounts = {}
     if backpack then
         for _, tool in ipairs(backpack:GetChildren()) do
@@ -4525,16 +4556,26 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         end
     end
 
-    local events = {"Enchanted", "Wet", "Alien", "Heavenly","Bacon"}
+    local eventNames = {}
+    if SacrificeData.Recipes then
+        for eventName, recipe in pairs(SacrificeData.Recipes) do
+            if type(recipe) == "table" and #recipe > 0 then
+                table.insert(eventNames, eventName)
+            end
+        end
+        table.sort(eventNames)
+    end
+
+    if #eventNames == 0 then
+        WindUI:Notify({ Title = "Weather Events Webhook", Content = "No event recipe data found.", Duration = 3, Icon = "alert-circle" })
+        return
+    end
 
     local CHAR_LIMIT = 4000
-    local desc = ""
-    local remaining_events = 0
-
     local eventBlocks = {}
 
-    for _, eventName in ipairs(events) do
-        local recipe = SacrificeData.Recipes and SacrificeData.Recipes[eventName]
+    for _, eventName in ipairs(eventNames) do
+        local recipe = SacrificeData.Recipes[eventName]
         if not recipe or #recipe == 0 then continue end
 
         local block = "**" .. eventName .. ":**\n"
@@ -4542,15 +4583,15 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
             if not req.Name or req.Name == "" then continue end
             local rarity = MystrixHub.Functions.GetRarityOfBrainrot(req.Name) or "Unknown"
             local owned  = ownedCounts[req.Name] or 0
-            block = block .. string.format("- **[%s] %s x%d**\n", rarity, req.Name, owned)
+            block = block .. string.format("- **[%s] %s** x%d\n", rarity, req.Name, owned)
         end
-
         table.insert(eventBlocks, block)
     end
 
-    -- Build description respecting char limit
+    local desc = ""
     local usedBlocks = {}
     local totalChars = 0
+    local remaining_events = 0
 
     for i, block in ipairs(eventBlocks) do
         local leftover   = #eventBlocks - i
@@ -4593,7 +4634,6 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
 
     local okEnc, body = pcall(HttpService.JSONEncode, HttpService, payload)
     if not okEnc or not body then return end
-
     MystrixHub.Functions.MakeRawRequest(url, "POST", { ["Content-Type"] = "application/json" }, body)
 end
 local WebhookSetup = MystrixHub.UIController.Tabs.Webhook:Section({ Title = "Setup", Icon = "link", Box = true, Opened = true })
