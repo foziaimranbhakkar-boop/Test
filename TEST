@@ -31,7 +31,7 @@ local NEBULAUTH_BASE_URL       = "https://api.nebulauth.com"
 local NEBULAUTH_API_TOKEN      = "mk_at_mqRNTHJ9GG0Xc7A1pWPb_OoCpshPMW-OSymq1encWnk"
 local NEBULAUTH_SIGNING_SECRET = "mk_sig_0GCXObajBi8W5Sv4PjJkvrieyXBOAiwehA-iD94OMHA"
 
-local CURRENT_VERSION  = "v3.5.3"
+local CURRENT_VERSION  = "v3.6"
 local DISCORD_INVITE   = "XV66VWqAaN"
 local HUB_LOGO         = "rbxassetid://85997568026025"
 local GAME_FOLDER_NAME = "MystrixHubKAL"
@@ -719,6 +719,17 @@ for rarity, wave in pairs(WaveData.Waves) do
     MystrixHub.FarmController.OriginalWaveSpeeds[rarity] = wave.Speed
 end
 MystrixHub.FarmController.StopWaves = false
+
+MystrixHub.FarmController.CollectShards = false
+MystrixHub.FarmController.IsSweeping = false
+ 
+MystrixHub.WorldCupController = {
+    AutoCollect     = false,
+    Loop            = nil,
+    SavedSettings   = nil,
+    FarmStartedByUs = false,
+}
+
 MystrixHub.FarmController.AnimationHooked = false
 function MystrixHub.Functions.ApplyTransparency()
     if MystrixHub.UIController.WinBG then
@@ -1154,6 +1165,87 @@ function MystrixHub.FarmController.TweenTo(root, target)
     tween.Completed:Wait()
 end
 
+function MystrixHub.FarmController.SweepShards(sweepSpeed, destination)
+    destination = destination or Vector3.new(690, 3, 238)
+    MystrixHub.FarmController.IsSweeping = true
+ 
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        MystrixHub.FarmController.IsSweeping = false
+        return
+    end
+ 
+    local currentX = root.Position.X
+    local shardHitboxes = {}
+local ballTypes = {["Common"]=true,["Epic"]=true,["Legendary"]=true,["RareLuckyBall"]=true}
+    for _, obj in ipairs(workspace.Debris:GetChildren()) do
+        local hitbox = obj:FindFirstChild("Hitbox")
+        if hitbox and hitbox:IsA("BasePart")
+           and hitbox.CanTouch
+           and hitbox.LocalTransparencyModifier < 1
+           and hitbox.Position.X > currentX then
+            table.insert(shardHitboxes, hitbox)
+        end
+        if ballTypes[obj.Name] then
+            local rootPart = obj:FindFirstChild("RootPart")
+            if rootPart and rootPart:IsA("BasePart") and rootPart.Position.X > currentX then
+                table.insert(shardHitboxes, rootPart)
+            end
+        end
+    end
+    table.sort(shardHitboxes, function(a, b)
+        return a.Position.X < b.Position.X
+    end)
+ 
+    local waypointIdx = 1
+    local deadline    = tick() + 60
+ 
+    while root and root.Parent
+          and MystrixHub.FarmController.Running
+          and tick() < deadline do
+ 
+        local dt = RunService.Heartbeat:Wait()
+ 
+        char = LocalPlayer.Character
+        if not char then break end
+        root = char:FindFirstChild("HumanoidRootPart")
+        if not root then break end
+ 
+        while waypointIdx <= #shardHitboxes do
+            local hb = shardHitboxes[waypointIdx]
+            if hb and hb.Parent and hb.LocalTransparencyModifier < 1 then
+                break
+            end
+            waypointIdx = waypointIdx + 1
+        end
+ 
+        local target
+        if waypointIdx <= #shardHitboxes then
+            target = shardHitboxes[waypointIdx].Position
+        else
+            target = destination
+        end
+ 
+        local toTarget = target - root.Position
+        local dist     = toTarget.Magnitude
+        local threshold = (waypointIdx <= #shardHitboxes) and 1 or 0.5
+ 
+        if dist < threshold then
+            if waypointIdx <= #shardHitboxes then
+                waypointIdx = waypointIdx + 1
+            else
+                break
+            end
+        else
+            local step  = math.min(sweepSpeed * dt, dist)
+            root.CFrame = CFrame.new(root.Position + toTarget.Unit * step)
+        end
+    end
+ 
+    MystrixHub.FarmController.IsSweeping = false
+end
+
 MystrixHub.FarmController.KickEventConnection = nil
 
 MystrixHub.FarmController.Start = function()
@@ -1344,7 +1436,12 @@ MystrixHub.FarmController.Start = function()
 
                 -- SATISFIED — wait for wave/run UI
                 KickServiceClient.Multipliers.Speed = originalLandingSpeed
-                if MystrixHub.FarmController.StopWaves then
+                if MystrixHub.FarmController.CollectShards then
+                    for rarity, wave in pairs(WaveData.Waves) do
+                        local orig = MystrixHub.FarmController.OriginalWaveSpeeds[rarity]
+                        if orig and orig > 0 then wave.Speed = orig end
+                    end
+                elseif MystrixHub.FarmController.StopWaves then
                     for _, wave in pairs(WaveData.Waves) do wave.Speed = 0 end
                 end
 
@@ -1403,45 +1500,51 @@ MystrixHub.FarmController.Start = function()
                 end
 
                 if root and root.Parent then
-                    if root.Position.X < -4401 then
-                        local preTarget = Vector3.new(-4401, 13, root.Position.Z)
-                        local preThread = task.spawn(function()
-                            local preHum  = char and char:FindFirstChildOfClass("Humanoid")
-                            local preSpd  = preHum and (preHum.WalkSpeed + 99) or 99
-                            local preDist = (preTarget - root.Position).Magnitude
-                            local preDur  = preDist / preSpd
-                            if preDur <= 0 then preDur = 0.01 end
-                            local preTween = TweenService:Create(root,
-                                TweenInfo.new(preDur, Enum.EasingStyle.Linear),
-                                { CFrame = CFrame.new(preTarget) })
-                            preTween:Play()
-                            preTween.Completed:Wait()
-                        end)
-                        while coroutine.status(preThread) ~= "dead" do
+                    if MystrixHub.FarmController.CollectShards then
+                        local sweepHum   = char:FindFirstChildOfClass("Humanoid")
+                        local sweepSpeed = math.max(sweepHum and (sweepHum.WalkSpeed + 7) or 16, 1)
+                        MystrixHub.FarmController.SweepShards(sweepSpeed, Vector3.new(703, 3, 239))
+                    else
+                        if root.Position.X < -4401 then
+                            local preTarget = Vector3.new(-4401, 13, root.Position.Z)
+                            local preThread = task.spawn(function()
+                                local preHum  = char and char:FindFirstChildOfClass("Humanoid")
+                                local preSpd  = preHum and (preHum.WalkSpeed + 99) or 99
+                                local preDist = (preTarget - root.Position).Magnitude
+                                local preDur  = preDist / preSpd
+                                if preDur <= 0 then preDur = 0.01 end
+                                local preTween = TweenService:Create(root,
+                                    TweenInfo.new(preDur, Enum.EasingStyle.Linear),
+                                    { CFrame = CFrame.new(preTarget) })
+                                preTween:Play()
+                                preTween.Completed:Wait()
+                            end)
+                            while coroutine.status(preThread) ~= "dead" do
+                                if not root or not root.Parent or LocalPlayer.Character ~= char then
+                                    task.cancel(preThread)
+                                    break
+                                end
+                                task.wait(0.1)
+                            end
                             if not root or not root.Parent or LocalPlayer.Character ~= char then
-                                task.cancel(preThread)
+                                lastPosition = nil
+                                return
+                            end
+                            root.CFrame = CFrame.new(-4351, -7, 230)
+                        end
+ 
+                        local flyThread = task.spawn(function()
+                            MystrixHub.FarmController.FlyPath(root, speedMult)
+                        end)
+                        while coroutine.status(flyThread) ~= "dead" do
+                            if not root or not root.Parent or LocalPlayer.Character ~= char then
+                                task.cancel(flyThread)
                                 break
                             end
                             task.wait(0.1)
                         end
-                        if not root or not root.Parent or LocalPlayer.Character ~= char then
-                            lastPosition = nil
-                            return
-                        end
-                        root.CFrame = CFrame.new(-4351, -7, 230)
                     end
-
-                    local flyThread = task.spawn(function()
-                        MystrixHub.FarmController.FlyPath(root, speedMult)
-                    end)
-                    while coroutine.status(flyThread) ~= "dead" do
-                        if not root or not root.Parent or LocalPlayer.Character ~= char then
-                            task.cancel(flyThread)
-                            break
-                        end
-                        task.wait(0.1)
-                    end
-
+ 
                     char = LocalPlayer.Character
                     if not char or char ~= root.Parent then
                         lastPosition = nil
@@ -1580,6 +1683,7 @@ end
 
 function MystrixHub.FarmController.Stop()
     MystrixHub.FarmController.Running = false
+    MystrixHub.FarmController.IsSweeping = false
     if MystrixHub.FarmController.KickEventConnection then
     pcall(function() MystrixHub.FarmController.KickEventConnection:Disconnect() end)
     MystrixHub.FarmController.KickEventConnection = nil
@@ -4300,6 +4404,141 @@ ActivateEventsSection:Toggle({
         else MystrixHub.ActivateEventsController.Stop() end
     end,
 })
+
+local WorldCupSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
+    Title  = "World Cup Event",
+    Icon   = "trophy",
+    Box    = true,
+    Opened = true,
+})
+ 
+WorldCupSection:Toggle({
+    Title    = "Auto Collect Orbs",
+    Value    = false,
+    Flag     = "WorldCupAutoCollect",
+    Callback = function(state)
+        MystrixHub.WorldCupController.AutoCollect = state
+ 
+        if state then
+            if MystrixHub.WorldCupController.Loop then
+                task.cancel(MystrixHub.WorldCupController.Loop)
+            end
+ 
+            MystrixHub.WorldCupController.Loop = task.spawn(function()
+                local eventActive      = false
+                local wasAlreadyFarming = false
+ 
+                while MystrixHub.WorldCupController.AutoCollect do
+                    -- NOTE: verify the exact WeatherService key for your game.
+                    -- Common candidates: WeatherService.Events.WorldCup
+                    --                   WeatherService.Events["Block Cup"]
+                    --                   WeatherService.Events.BlockCup
+local isWorldCup = WeatherService.Events and (
+                        WeatherService.Events.WorldCup
+                        or WeatherService.Events["Block Cup"]
+                        or WeatherService.Events.BlockCup
+                        or WeatherService.Events.BC
+                    )
+ 
+                    if isWorldCup and not eventActive then
+                        eventActive = true
+                        wasAlreadyFarming = MystrixHub.FarmController.Running
+ 
+                        MystrixHub.WorldCupController.SavedSettings = {
+                            Specific  = MystrixHub.FarmController.SelectedSpecific,
+                            Rarities  = MystrixHub.FarmController.SelectedRarities,
+                            Mutations = MystrixHub.FarmController.SelectedMutations,
+                        }
+ 
+                        MystrixHub.FarmController.SelectedSpecific  = {}
+                        MystrixHub.FarmController.SelectedRarities  = MystrixHub.RarityOrder
+                        MystrixHub.FarmController.SelectedMutations = {"Any"}
+                        MystrixHub.FarmController.CollectShards = true
+ 
+                        if not MystrixHub.FarmController.Running then
+                            MystrixHub.FarmController.Start()
+                            MystrixHub.WorldCupController.FarmStartedByUs = true
+                        end
+ 
+                        WindUI:Notify({
+                            Title    = "World Cup Event",
+                            Content  = "Started! Keeping all brainrots & sweeping orbs.",
+                            Duration = 4,
+                            Icon     = "trophy",
+                        })
+ 
+                    elseif not isWorldCup and eventActive then
+                        eventActive = false
+                        MystrixHub.FarmController.CollectShards = false
+ 
+                        local waitStart = tick()
+                        while MystrixHub.FarmController.IsSweeping and tick() - waitStart < 60 do
+                            task.wait(0.2)
+                        end
+ 
+                        local saved = MystrixHub.WorldCupController.SavedSettings
+                        MystrixHub.FarmController.SelectedSpecific  = saved and saved.Specific  or {}
+                        MystrixHub.FarmController.SelectedRarities  = saved and saved.Rarities  or {}
+                        MystrixHub.FarmController.SelectedMutations = saved and saved.Mutations or {"Any"}
+                        MystrixHub.WorldCupController.SavedSettings = nil
+ 
+                        if MystrixHub.WorldCupController.FarmStartedByUs and not wasAlreadyFarming then
+                            MystrixHub.FarmController.Stop()
+                            MystrixHub.WorldCupController.FarmStartedByUs = false
+                        end
+ 
+                        WindUI:Notify({
+                            Title    = "World Cup Event",
+                            Content  = "Ended. Farm settings restored.",
+                            Duration = 3,
+                            Icon     = "trophy",
+                        })
+                    end
+ 
+                    task.wait(1)
+                end
+ 
+                -- Cleanup if loop exits while event was still active
+                if eventActive then
+                    MystrixHub.FarmController.CollectShards = false
+                    local waitStart = tick()
+                    while MystrixHub.FarmController.IsSweeping and tick() - waitStart < 60 do
+                        task.wait(0.2)
+                    end
+                    local saved = MystrixHub.WorldCupController.SavedSettings
+                    MystrixHub.FarmController.SelectedSpecific  = saved and saved.Specific  or {}
+                    MystrixHub.FarmController.SelectedRarities  = saved and saved.Rarities  or {}
+                    MystrixHub.FarmController.SelectedMutations = saved and saved.Mutations or {"Any"}
+                    MystrixHub.WorldCupController.SavedSettings = nil
+                    if MystrixHub.WorldCupController.FarmStartedByUs then
+                        MystrixHub.FarmController.Stop()
+                        MystrixHub.WorldCupController.FarmStartedByUs = false
+                    end
+                end
+            end)
+ 
+        else
+            MystrixHub.WorldCupController.AutoCollect = false
+            MystrixHub.FarmController.CollectShards = false
+            if MystrixHub.WorldCupController.Loop then
+                task.cancel(MystrixHub.WorldCupController.Loop)
+                MystrixHub.WorldCupController.Loop = nil
+            end
+            local saved = MystrixHub.WorldCupController.SavedSettings
+            if saved then
+                MystrixHub.FarmController.SelectedSpecific  = saved.Specific  or {}
+                MystrixHub.FarmController.SelectedRarities  = saved.Rarities  or {}
+                MystrixHub.FarmController.SelectedMutations = saved.Mutations or {"Any"}
+                MystrixHub.WorldCupController.SavedSettings = nil
+            end
+            if MystrixHub.WorldCupController.FarmStartedByUs then
+                MystrixHub.FarmController.Stop()
+                MystrixHub.WorldCupController.FarmStartedByUs = false
+            end
+        end
+    end,
+})
+
 if MystrixHub.Meta.MemberCount == "Fetching..." then task.wait(1.5) end
 
 MystrixHub.UIController.Tabs.Home:Section({ Title = "Discord", Icon = "geist:logo-discord", Box = true, Opened = true }):Paragraph({
