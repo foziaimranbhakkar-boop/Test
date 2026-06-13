@@ -31,7 +31,7 @@ local NEBULAUTH_BASE_URL       = "https://api.nebulauth.com"
 local NEBULAUTH_API_TOKEN      = "mk_at_mqRNTHJ9GG0Xc7A1pWPb_OoCpshPMW-OSymq1encWnk"
 local NEBULAUTH_SIGNING_SECRET = "mk_sig_0GCXObajBi8W5Sv4PjJkvrieyXBOAiwehA-iD94OMHA"
 
-local CURRENT_VERSION  = "v3.5"
+local CURRENT_VERSION  = "v3.5.1"
 local DISCORD_INVITE   = "XV66VWqAaN"
 local HUB_LOGO         = "rbxassetid://85997568026025"
 local GAME_FOLDER_NAME = "MystrixHubKAL"
@@ -1275,9 +1275,7 @@ WindUI:Notify({
                 if not satisfied then
                     KickServiceClient.Multipliers.Speed = 1e6
 
-                    for _, wave in pairs(WaveData.Waves) do
-                        wave.Speed = 9999
-                    end
+                    
 
                     pcall(function()
                         if char and char.PrimaryPart then
@@ -1324,11 +1322,9 @@ WindUI:Notify({
                 end
 
 
- KickServiceClient.Multipliers.Speed = originalLandingSpeed
+KickServiceClient.Multipliers.Speed = originalLandingSpeed
 if MystrixHub.FarmController.StopWaves then
     for _, wave in pairs(WaveData.Waves) do wave.Speed = 0 end
-else
-    for rarity, wave in pairs(WaveData.Waves) do wave.Speed = MystrixHub.FarmController.OriginalWaveSpeeds[rarity] or 0 end
 end
 
                 local hud = LocalPlayer.PlayerGui:FindFirstChild("HUD")
@@ -1338,13 +1334,7 @@ end
                     or not MystrixHub.FarmController.Running
                 if not MystrixHub.FarmController.Running then return end
 
-                if not MystrixHub.FarmController.CollectShards then
-                    pcall(function()
-                        for _, waveModel in ipairs(workspace.Waves:GetChildren()) do
-                            waveModel:Destroy()
-                        end
-                    end)
-                end
+
 
                 task.wait(0.5)
 
@@ -1613,15 +1603,10 @@ function MystrixHub.FarmController.Stop()
         KickServiceClient.Multipliers.Speed = 1
     end)
 
-    if MystrixHub.FarmController.StopWaves then
-        for _, wave in pairs(WaveData.Waves) do
-            wave.Speed = 0
-        end
-    else
-        for rarity, wave in pairs(WaveData.Waves) do
-            wave.Speed = MystrixHub.FarmController.OriginalWaveSpeeds[rarity] or 0
-        end
-    end
+for rarity, wave in pairs(WaveData.Waves) do
+    local orig = MystrixHub.FarmController.OriginalWaveSpeeds[rarity]
+    if orig and orig > 0 then wave.Speed = orig end
+end
     pcall(function()
         LocalPlayer.PlayerGui.HUD.KickButton.Visible = true
     end)
@@ -4069,16 +4054,24 @@ Row2:VStack():Toggle({
     Title    = "Stop Waves",
     Value    = false,
     Flag     = "afStopWaves",
-    Callback = function(state)
-        MystrixHub.FarmController.StopWaves = state
+Callback = function(state)
+    MystrixHub.FarmController.StopWaves = state
+    if state then
+        -- Snapshot current speeds before zeroing (so they're actually non-zero)
         for rarity, wave in pairs(WaveData.Waves) do
-            if state then
-                wave.Speed = 0
-            else
-                wave.Speed = MystrixHub.FarmController.OriginalWaveSpeeds[rarity] or 0
+            if wave.Speed > 0 then
+                MystrixHub.FarmController.OriginalWaveSpeeds[rarity] = wave.Speed
             end
+            wave.Speed = 0
         end
-    end,
+    else
+        -- Restore only if we have real captured values
+        for rarity, wave in pairs(WaveData.Waves) do
+            local orig = MystrixHub.FarmController.OriginalWaveSpeeds[rarity]
+            if orig and orig > 0 then wave.Speed = orig end
+        end
+    end
+end,
 })
 Row2:VStack():Toggle({
     Title    = "Auto Farm",
