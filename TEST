@@ -1240,6 +1240,8 @@ for _, obj in ipairs(workspace.Debris:GetChildren()) do
 MystrixHub.FarmController.IsSweeping = false
 end
 
+
+-- NEW
 function MystrixHub.FarmController.SweepBalls(sweepSpeed, destination)
     destination = destination or Vector3.new(703, 3, 239)
     MystrixHub.FarmController.IsSweeping = true
@@ -1251,67 +1253,68 @@ function MystrixHub.FarmController.SweepBalls(sweepSpeed, destination)
         return
     end
 
+    -- KEY FIX: capture original character so we stop if character dies/respawns
+    local originalChar = char
+    local currentX = root.Position.X
     local ballTypes = {["Common"]=true,["Epic"]=true,["Legendary"]=true,["RareLuckyBall"]=true}
-    local startX = root.Position.X
-    local balls = {}
+    local ballRoots = {}
 
     for _, obj in ipairs(workspace.Debris:GetChildren()) do
         if ballTypes[obj.Name] then
             local rp = obj:FindFirstChild("RootPart")
-            if rp and rp:IsA("BasePart") and rp.Position.X > startX then
-                table.insert(balls, {
-                    ref   = rp,
-                    origX = rp.Position.X,
-                    origZ = rp.Position.Z,
-                })
+            if rp and rp:IsA("BasePart") and rp.Position.X > currentX then
+                table.insert(ballRoots, rp)
             end
         end
     end
-    table.sort(balls, function(a, b) return a.origX < b.origX end)
+    table.sort(ballRoots, function(a, b)
+        return a.Position.X < b.Position.X
+    end)
 
     local waypointIdx = 1
     local deadline    = tick() + 60
 
     while root and root.Parent
+          and LocalPlayer.Character == originalChar
           and MystrixHub.FarmController.Running
           and tick() < deadline do
 
         local dt = RunService.Heartbeat:Wait()
 
+        -- Stop if character died and a new one spawned
+        if LocalPlayer.Character ~= originalChar then break end
         char = LocalPlayer.Character
         if not char then break end
         root = char:FindFirstChild("HumanoidRootPart")
         if not root then break end
 
-        while waypointIdx <= #balls do
-            local entry = balls[waypointIdx]
-            local rp = entry.ref
-            if rp and rp.Parent then
-                break
-            end
+        -- Skip balls that have already been collected (Parent == nil)
+        while waypointIdx <= #ballRoots do
+            local rp = ballRoots[waypointIdx]
+            if rp and rp.Parent then break end
             waypointIdx = waypointIdx + 1
         end
 
         local target
-        if waypointIdx <= #balls then
-            local entry = balls[waypointIdx]
-            target = Vector3.new(entry.origX, root.Position.Y, entry.origZ)
+        if waypointIdx <= #ballRoots then
+            -- Use live position (balls can move with waves)
+            target = ballRoots[waypointIdx].Position
         else
-            target = Vector3.new(destination.X, root.Position.Y, destination.Z)
+            target = destination
         end
 
         local toTarget = target - root.Position
         local dist     = toTarget.Magnitude
-        local threshold = (waypointIdx <= #balls) and 3 or 0.5
+        local threshold = (waypointIdx <= #ballRoots) and 3 or 0.5
 
         if dist < threshold then
-            if waypointIdx <= #balls then
+            if waypointIdx <= #ballRoots then
                 waypointIdx = waypointIdx + 1
             else
                 break
             end
         else
-            local step = math.min(sweepSpeed * dt, dist)
+            local step  = math.min(sweepSpeed * dt, dist)
             root.CFrame = CFrame.new(root.Position + toTarget.Unit * step)
         end
     end
@@ -4491,6 +4494,7 @@ local WorldCupSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
     Opened = true,
 })
 
+-- NEW
 WorldCupSection:Toggle({
     Title    = "Auto Collect Balls",
     Value    = false,
@@ -4504,36 +4508,48 @@ WorldCupSection:Toggle({
             end
 
             MystrixHub.WorldCupController.Loop = task.spawn(function()
-                local eventActive      = false
+                local eventActive       = false
                 local wasAlreadyFarming = false
 
-                while MystrixHub.WorldCupController.AutoCollect do
-                    local isBlockCup = WeatherService.Events and (
-                        WeatherService.Events.BlockCup
-                        or WeatherService.Events["Block Cup"]
-                        or WeatherService.Events.WorldCup
-                        or WeatherService.Events.BC
-                    )
-                    if not isBlockCup then
-                        pcall(function()
-                            local bcGui = LocalPlayer.PlayerGui:FindFirstChild("BlockCup")
-                            if bcGui and bcGui.Enabled then isBlockCup = true end
-                        end)
+                -- Detection: BlockCup GUI is primary (Block Cup may not be a WeatherService event)
+                local function isBlockCupActive()
+                    local active = false
+                    pcall(function()
+                        local bcGui = LocalPlayer.PlayerGui:FindFirstChild("BlockCup")
+                        if bcGui and bcGui.Enabled then active = true end
+                    end)
+                    if active then return true end
+                    -- WeatherService fallbacks in case it IS registered there
+                    if WeatherService and WeatherService.Events then
+                        for _, key in ipairs({"BlockCup","Block Cup","WorldCup","BC","Cup","Soccer","BlockCupEvent"}) do
+                            if WeatherService.Events[key] then return true end
+                        end
                     end
+                    return false
+                end
 
-                    if isBlockCup and not eventActive then
-                        eventActive      = true
+                while MystrixHub.WorldCupController.AutoCollect do
+                    local active = isBlockCupActive()
+
+                    if active and not eventActive then
+                        eventActive       = true
                         wasAlreadyFarming = MystrixHub.FarmController.Running
 
+                        -- Save copies of current settings (not references)
+                        local function copyList(t)
+                            local c = {}
+                            for _, v in ipairs(t) do c[#c+1] = v end
+                            return c
+                        end
                         MystrixHub.WorldCupController.SavedSettings = {
-                            Specific  = MystrixHub.FarmController.SelectedSpecific,
-                            Rarities  = MystrixHub.FarmController.SelectedRarities,
-                            Mutations = MystrixHub.FarmController.SelectedMutations,
+                            Specific  = copyList(MystrixHub.FarmController.SelectedSpecific),
+                            Rarities  = copyList(MystrixHub.FarmController.SelectedRarities),
+                            Mutations = copyList(MystrixHub.FarmController.SelectedMutations),
                             MinCPS    = MystrixHub.CPSFilterController.MinCPS,
                         }
 
                         MystrixHub.FarmController.SelectedSpecific  = {}
-                        MystrixHub.FarmController.SelectedRarities  = MystrixHub.RarityOrder
+                        MystrixHub.FarmController.SelectedRarities  = {}
                         MystrixHub.FarmController.SelectedMutations = {"Any"}
                         MystrixHub.CPSFilterController.MinCPS       = 0
                         MystrixHub.FarmController.CollectBalls       = true
@@ -4545,27 +4561,29 @@ WorldCupSection:Toggle({
                         end
 
                         WindUI:Notify({
-                            Title    = "World Cup Event",
+                            Title    = "Block Cup Event",
                             Content  = "Started! Keeping all brainrots & collecting balls.",
                             Duration = 4,
                             Icon     = "trophy",
                         })
 
-                    elseif not isBlockCup and eventActive then
+                    elseif not active and eventActive then
                         eventActive = false
                         MystrixHub.FarmController.CollectBalls = false
 
                         local waitStart = tick()
-                        while MystrixHub.FarmController.IsSweeping and tick() - waitStart < 60 do
+                        while MystrixHub.FarmController.IsSweeping and tick() - waitStart < 30 do
                             task.wait(0.2)
                         end
 
                         local saved = MystrixHub.WorldCupController.SavedSettings
-                        MystrixHub.FarmController.SelectedSpecific  = saved and saved.Specific  or {}
-                        MystrixHub.FarmController.SelectedRarities  = saved and saved.Rarities  or {}
-                        MystrixHub.FarmController.SelectedMutations = saved and saved.Mutations or {"Any"}
-                        MystrixHub.CPSFilterController.MinCPS       = saved and saved.MinCPS or 0
-                        MystrixHub.WorldCupController.SavedSettings = nil
+                        if saved then
+                            MystrixHub.FarmController.SelectedSpecific  = saved.Specific  or {}
+                            MystrixHub.FarmController.SelectedRarities  = saved.Rarities  or {}
+                            MystrixHub.FarmController.SelectedMutations = saved.Mutations or {"Any"}
+                            MystrixHub.CPSFilterController.MinCPS       = saved.MinCPS or 0
+                            MystrixHub.WorldCupController.SavedSettings = nil
+                        end
 
                         if MystrixHub.WorldCupController.FarmStartedByUs and not wasAlreadyFarming then
                             MystrixHub.FarmController.Stop()
@@ -4573,7 +4591,7 @@ WorldCupSection:Toggle({
                         end
 
                         WindUI:Notify({
-                            Title    = "World Cup Event",
+                            Title    = "Block Cup Event",
                             Content  = "Ended. Farm settings restored.",
                             Duration = 3,
                             Icon     = "trophy",
@@ -4583,18 +4601,21 @@ WorldCupSection:Toggle({
                     task.wait(1)
                 end
 
+                -- Cleanup if toggle turned off while event was still active
                 if eventActive then
                     MystrixHub.FarmController.CollectBalls = false
                     local waitStart = tick()
-                    while MystrixHub.FarmController.IsSweeping and tick() - waitStart < 60 do
+                    while MystrixHub.FarmController.IsSweeping and tick() - waitStart < 30 do
                         task.wait(0.2)
                     end
                     local saved = MystrixHub.WorldCupController.SavedSettings
-                    MystrixHub.FarmController.SelectedSpecific  = saved and saved.Specific  or {}
-                    MystrixHub.FarmController.SelectedRarities  = saved and saved.Rarities  or {}
-                    MystrixHub.FarmController.SelectedMutations = saved and saved.Mutations or {"Any"}
-                    MystrixHub.CPSFilterController.MinCPS       = saved and saved.MinCPS or 0
-                    MystrixHub.WorldCupController.SavedSettings = nil
+                    if saved then
+                        MystrixHub.FarmController.SelectedSpecific  = saved.Specific  or {}
+                        MystrixHub.FarmController.SelectedRarities  = saved.Rarities  or {}
+                        MystrixHub.FarmController.SelectedMutations = saved.Mutations or {"Any"}
+                        MystrixHub.CPSFilterController.MinCPS       = saved.MinCPS or 0
+                        MystrixHub.WorldCupController.SavedSettings = nil
+                    end
                     if MystrixHub.WorldCupController.FarmStartedByUs then
                         MystrixHub.FarmController.Stop()
                         MystrixHub.WorldCupController.FarmStartedByUs = false
