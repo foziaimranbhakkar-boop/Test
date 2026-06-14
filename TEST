@@ -720,7 +720,7 @@ for rarity, wave in pairs(WaveData.Waves) do
 end
 MystrixHub.FarmController.StopWaves = false
 
-MystrixHub.FarmController.CollectShards = false
+
 MystrixHub.FarmController.CollectBalls = false
 MystrixHub.FarmController.IsSweeping = false
  
@@ -1166,82 +1166,7 @@ function MystrixHub.FarmController.TweenTo(root, target)
     tween.Completed:Wait()
 end
 
-function MystrixHub.FarmController.SweepShards(sweepSpeed, destination)
-    destination = destination or Vector3.new(690, 3, 238)
-    MystrixHub.FarmController.IsSweeping = true
- 
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then
-        MystrixHub.FarmController.IsSweeping = false
-        return
-    end
- 
-    local currentX = root.Position.X
-    local shardHitboxes = {}
-for _, obj in ipairs(workspace.Debris:GetChildren()) do
-        local hitbox = obj:FindFirstChild("Hitbox")
-        if hitbox and hitbox:IsA("BasePart")
-           and hitbox.CanTouch
-           and hitbox.LocalTransparencyModifier < 1
-           and hitbox.Position.X > currentX then
-            table.insert(shardHitboxes, hitbox)
-        end
-    end
-    table.sort(shardHitboxes, function(a, b)
-        return a.Position.X < b.Position.X
-    end)
- 
-    local waypointIdx = 1
-    local deadline    = tick() + 60
- 
-    while root and root.Parent
-          and MystrixHub.FarmController.Running
-          and tick() < deadline do
- 
-        local dt = RunService.Heartbeat:Wait()
- 
-        char = LocalPlayer.Character
-        if not char then break end
-        root = char:FindFirstChild("HumanoidRootPart")
-        if not root then break end
- 
-        while waypointIdx <= #shardHitboxes do
-            local hb = shardHitboxes[waypointIdx]
-            if hb and hb.Parent and hb.LocalTransparencyModifier < 1 then
-                break
-            end
-            waypointIdx = waypointIdx + 1
-        end
- 
-        local target
-        if waypointIdx <= #shardHitboxes then
-            target = shardHitboxes[waypointIdx].Position
-        else
-            target = destination
-        end
- 
-        local toTarget = target - root.Position
-        local dist     = toTarget.Magnitude
-        local threshold = (waypointIdx <= #shardHitboxes) and 1 or 0.5
- 
-        if dist < threshold then
-            if waypointIdx <= #shardHitboxes then
-                waypointIdx = waypointIdx + 1
-            else
-                break
-            end
-        else
-            local step  = math.min(sweepSpeed * dt, dist)
-            root.CFrame = CFrame.new(root.Position + toTarget.Unit * step)
-        end
-    end
- 
-MystrixHub.FarmController.IsSweeping = false
-end
 
-
--- NEW
 function MystrixHub.FarmController.SweepBalls(sweepSpeed, destination)
     destination = destination or Vector3.new(703, 3, 239)
     MystrixHub.FarmController.IsSweeping = true
@@ -1253,8 +1178,6 @@ function MystrixHub.FarmController.SweepBalls(sweepSpeed, destination)
         return
     end
 
-    -- KEY FIX: capture original character so we stop if character dies/respawns
-    local originalChar = char
     local currentX = root.Position.X
     local ballTypes = {["Common"]=true,["Epic"]=true,["Legendary"]=true,["RareLuckyBall"]=true}
     local ballRoots = {}
@@ -1275,20 +1198,16 @@ function MystrixHub.FarmController.SweepBalls(sweepSpeed, destination)
     local deadline    = tick() + 60
 
     while root and root.Parent
-          and LocalPlayer.Character == originalChar
           and MystrixHub.FarmController.Running
           and tick() < deadline do
 
         local dt = RunService.Heartbeat:Wait()
 
-        -- Stop if character died and a new one spawned
-        if LocalPlayer.Character ~= originalChar then break end
         char = LocalPlayer.Character
         if not char then break end
         root = char:FindFirstChild("HumanoidRootPart")
         if not root then break end
 
-        -- Skip balls that have already been collected (Parent == nil)
         while waypointIdx <= #ballRoots do
             local rp = ballRoots[waypointIdx]
             if rp and rp.Parent then break end
@@ -1297,7 +1216,6 @@ function MystrixHub.FarmController.SweepBalls(sweepSpeed, destination)
 
         local target
         if waypointIdx <= #ballRoots then
-            -- Use live position (balls can move with waves)
             target = ballRoots[waypointIdx].Position
         else
             target = destination
@@ -1305,7 +1223,7 @@ function MystrixHub.FarmController.SweepBalls(sweepSpeed, destination)
 
         local toTarget = target - root.Position
         local dist     = toTarget.Magnitude
-        local threshold = (waypointIdx <= #ballRoots) and 3 or 0.5
+        local threshold = (waypointIdx <= #ballRoots) and 1 or 0.5
 
         if dist < threshold then
             if waypointIdx <= #ballRoots then
@@ -1512,14 +1430,9 @@ MystrixHub.FarmController.Start = function()
 
                 -- SATISFIED — wait for wave/run UI
                 KickServiceClient.Multipliers.Speed = originalLandingSpeed
-if MystrixHub.FarmController.CollectShards or MystrixHub.FarmController.CollectBalls then
-                    for rarity, wave in pairs(WaveData.Waves) do
-                        local orig = MystrixHub.FarmController.OriginalWaveSpeeds[rarity]
-                        if orig and orig > 0 then wave.Speed = orig end
-                    end
-                elseif MystrixHub.FarmController.StopWaves then
-                    for _, wave in pairs(WaveData.Waves) do wave.Speed = 0 end
-                end
+if MystrixHub.FarmController.StopWaves then
+    for _, wave in pairs(WaveData.Waves) do wave.Speed = 0 end
+end
 
                 local hud = LocalPlayer.PlayerGui:FindFirstChild("HUD")
                     or LocalPlayer.PlayerGui:WaitForChild("HUD")
@@ -1527,7 +1440,7 @@ if MystrixHub.FarmController.CollectShards or MystrixHub.FarmController.CollectB
                 repeat task.wait(0.1) until runGui.Visible or not MystrixHub.FarmController.Running
                 if not MystrixHub.FarmController.Running then return end
 
-if not MystrixHub.FarmController.CollectShards and not MystrixHub.FarmController.CollectBalls then
+if not MystrixHub.FarmController.CollectBalls then
                     pcall(function()
                         for _, waveModel in ipairs(workspace.Waves:GetChildren()) do
                             waveModel:Destroy()
@@ -1580,10 +1493,7 @@ if root and root.Parent then
                         local sweepHum   = char:FindFirstChildOfClass("Humanoid")
                         local sweepSpeed = math.max(sweepHum and (sweepHum.WalkSpeed + 7) or 16, 1)
                         MystrixHub.FarmController.SweepBalls(sweepSpeed, Vector3.new(703, 3, 239))
-                    elseif MystrixHub.FarmController.CollectShards then
-                        local sweepHum   = char:FindFirstChildOfClass("Humanoid")
-                        local sweepSpeed = math.max(sweepHum and (sweepHum.WalkSpeed + 7) or 16, 1)
-                        MystrixHub.FarmController.SweepShards(sweepSpeed, Vector3.new(703, 3, 239))
+
                     else
                         if root.Position.X < -4401 then
                             local preTarget = Vector3.new(-4401, 13, root.Position.Z)
@@ -4553,7 +4463,7 @@ WorldCupSection:Toggle({
                         MystrixHub.FarmController.SelectedMutations = {"Any"}
                         MystrixHub.CPSFilterController.MinCPS       = 0
                         MystrixHub.FarmController.CollectBalls       = true
-                        MystrixHub.FarmController.CollectShards      = false
+                       
 
                         if not MystrixHub.FarmController.Running then
                             MystrixHub.FarmController.Start()
