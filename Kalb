@@ -31,13 +31,13 @@ local NEBULAUTH_BASE_URL       = "https://api.nebulauth.com"
 local NEBULAUTH_API_TOKEN      = "mk_at_mqRNTHJ9GG0Xc7A1pWPb_OoCpshPMW-OSymq1encWnk"
 local NEBULAUTH_SIGNING_SECRET = "mk_sig_0GCXObajBi8W5Sv4PjJkvrieyXBOAiwehA-iD94OMHA"
 
-local CURRENT_VERSION  = "v3.5"
+local CURRENT_VERSION  = "v3.8"
 local DISCORD_INVITE   = "XV66VWqAaN"
 local HUB_LOGO         = "rbxassetid://85997568026025"
 local GAME_FOLDER_NAME = "MystrixHubKAL"
 local GAME_FOLDER_PATH = "WindUI/" .. GAME_FOLDER_NAME
 local EXEC_DATA_FILE   = "WindUI/NebulAuth_ExecData.json"
-local USE_KEY_SYSTEM   = true
+local USE_KEY_SYSTEM   = false
 
 local Services = setmetatable({}, {
     __index = function(_, Index)
@@ -70,9 +70,8 @@ pcall(function()
     _GameMutationData = require(game:GetService("ReplicatedStorage").Shared.Data.MutationData)
 end)
 
-
 local _RARITY_ORDER = {
-    "Exclusive","Eternal","Celestial","OG","Hacked","Divine",
+    "Exclusive","Abyssal","Eternal","Celestial","OG","Hacked","Divine",
     "Secret","Godly","Mythic","Legendary","Epic","Rare","Common",
 }
 
@@ -136,6 +135,23 @@ if _GameMutationData and _GameMutationData.Buffs then
 end
 table.insert(_MutationList, "None")
 
+local _GameSacrificeData
+pcall(function()
+    _GameSacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+end)
+
+local _WeatherEvents = {}
+if _GameSacrificeData and _GameSacrificeData.Recipes then
+    for eventName, recipe in pairs(_GameSacrificeData.Recipes) do
+        if type(recipe) == "table" and #recipe > 0 then
+            table.insert(_WeatherEvents, eventName)
+        end
+    end
+    table.sort(_WeatherEvents)
+end
+if #_WeatherEvents == 0 then
+    _WeatherEvents = {"Wet","Void","Bacon","Enchanted","Alien","Heavenly","Phantom"}
+end
 
 getgenv().MystrixHub = {
 
@@ -235,6 +251,7 @@ getgenv().MystrixHub = {
     RarityData = _RarityData,
     RarityOrder = _RARITY_ORDER,
     RarityOrder1 = _RARITY_ORDER1,
+    SacrificeData = _GameSacrificeData,
 
     WeightNames = {
         "Planet Barbell","Emerald Barbell","Giant Gold Star Barbell","Neon Pulse",
@@ -277,7 +294,7 @@ WeatherMachineController = {
     Running        = false,
     Loop           = nil,
     StartedFarm    = false,
-Values = {"Enchanted", "Wet", "Alien", "Heavenly"},
+Values = _WeatherEvents,
     SavedSettings  = { Specific = {}, Rarities = {}, Mutations = {"Any"}, Percent = 1 },
 },
 
@@ -701,6 +718,8 @@ for rarity, wave in pairs(WaveData.Waves) do
     MystrixHub.FarmController.OriginalWaveSpeeds[rarity] = wave.Speed
 end
 MystrixHub.FarmController.StopWaves = false
+
+ 
 MystrixHub.FarmController.AnimationHooked = false
 function MystrixHub.Functions.ApplyTransparency()
     if MystrixHub.UIController.WinBG then
@@ -1136,24 +1155,46 @@ function MystrixHub.FarmController.TweenTo(root, target)
     tween.Completed:Wait()
 end
 
+
+
+MystrixHub.FarmController.KickEventConnection = nil
+
 MystrixHub.FarmController.Start = function()
     if MystrixHub.FarmController.Running then return end
     MystrixHub.FarmController.Running = true
     MystrixHub.FarmController.IsCollecting = false
-
     MystrixHub.FarmController.BlockKickCollect = true
+
+    -- Hook rev_KickEvent.OnClientEvent to capture brainrot data
+    -- (server fires back on the same remote: distance, brainrots[], waveData)
+    local pendingBrainrotData = nil
+    pcall(function()
+        local remote = ReplicatedStorage:WaitForChild("Shared")
+            :WaitForChild("Packages"):WaitForChild("Network")
+            :FindFirstChild("rev_KickEvent")
+            or ReplicatedStorage.Shared.Packages.Network:FindFirstChild("KickEvent")
+        if remote and remote:IsA("RemoteEvent") then
+            if MystrixHub.FarmController.KickEventConnection then
+                pcall(function() MystrixHub.FarmController.KickEventConnection:Disconnect() end)
+            end
+            MystrixHub.FarmController.KickEventConnection = remote.OnClientEvent:Connect(function(p1, p2, p3)
+                if type(p2) == "table" and #p2 > 0 then
+                    pendingBrainrotData = p2
+                end
+            end)
+        end
+    end)
 
     MystrixHub.FarmController.KickSpamLoop = task.spawn(function()
         while MystrixHub.FarmController.Running do
             pcall(function()
-             
-local currentPercent = 1
-pcall(function()
-    local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
-    currentPercent = KickSvc.Percent or 1
-end)
-MystrixHub.FarmController.KickPercent = currentPercent   
-MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
+                local currentPercent = 1
+                pcall(function()
+                    local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
+                    currentPercent = KickSvc.Percent or 1
+                end)
+                MystrixHub.FarmController.KickPercent = currentPercent
+                MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
             end)
             task.wait(1)
         end
@@ -1210,56 +1251,55 @@ MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
                     lastPositionTime = tick()
                 end
 
+                -- Clear before kicking so we get fresh data
+                pendingBrainrotData = nil
+
                 MystrixHub.FarmController.TweenTo(root, Vector3.new(690, 3, 238))
                 task.wait(0.3)
 
-local currentPercent = 1
-pcall(function()
-    local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
-    currentPercent = KickSvc.Percent or 1
-end)
-MystrixHub.FarmController.KickPercent = currentPercent 
-MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
+                local currentPercent = 1
+                pcall(function()
+                    local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
+                    currentPercent = KickSvc.Percent or 1
+                end)
+                MystrixHub.FarmController.KickPercent = currentPercent
+                MystrixHub.Functions.FireRemote("rev_KickEvent", 1, currentPercent)
                 task.wait(0.3)
 
-                local attr = LocalPlayer:GetAttribute("InGame")
+                -- Wait for KickEvent server response (replaces InGame attribute)
                 local attempts = 0
-                while (not attr or attr == "") and attempts < 20 and MystrixHub.FarmController.Running do
+                while not pendingBrainrotData and attempts < 30 and MystrixHub.FarmController.Running do
                     task.wait(0.1)
                     attempts = attempts + 1
-                    attr = LocalPlayer:GetAttribute("InGame")
                 end
 
-                if not attr or attr == "" then
-                    return
-                end
+                if not pendingBrainrotData then return end
 
-               local satisfied = MystrixHub.FarmController.IsConditionMet(attr)
+                local firstBrainrot = pendingBrainrotData[1]
+                if not firstBrainrot or not firstBrainrot.Name then return end
 
-                local parts = {}
-                for part in attr:gmatch("[^,]+") do
-                    table.insert(parts, part:match("^%s*(.-)%s*$"))
-                end
-                local brainName  = parts[1] or "???"
-                local mutation   = parts[2] or "None"
+                local brainName = firstBrainrot.Name
+                local mutation  = (firstBrainrot.Mutation and firstBrainrot.Mutation ~= "")
+                    and firstBrainrot.Mutation or "None"
+                local attr = brainName .. "," .. mutation
+
+                local satisfied = MystrixHub.FarmController.IsConditionMet(attr)
+
                 local rarity     = MystrixHub.Functions.GetRarityOfBrainrot(brainName) or "Unknown"
                 local statusText = satisfied and "(WANTED) Keeping ✅" or "(UNWANTED) Skipping ❌"
-                local iconUrl = MystrixHub.Functions.GetBrainrotIcon(brainName)
-local cpsVal  = MystrixHub.Functions.GetBrainrotCurrentCPS(brainName, mutation)
-local cpsStr  = MystrixHub.Functions.FormatCPSShort(cpsVal)
-WindUI:Notify({
-    Title    = "Brainrot Detected",
-    Content  = string.format("Name: %s\nMutation: %s\nRarity: %s\nCPS: %s\nStatus: %s",
-        brainName, mutation, rarity, cpsStr, statusText),
-    Duration = 10,
-    Icon     = iconUrl or (satisfied and "check-circle" or "x-circle"),
-})
+                local iconUrl    = MystrixHub.Functions.GetBrainrotIcon(brainName)
+                local cpsVal     = MystrixHub.Functions.GetBrainrotCurrentCPS(brainName, mutation)
+                local cpsStr     = MystrixHub.Functions.FormatCPSShort(cpsVal)
+                WindUI:Notify({
+                    Title    = "Brainrot Detected",
+                    Content  = string.format("Name: %s\nMutation: %s\nRarity: %s\nCPS: %s\nStatus: %s",
+                        brainName, mutation, rarity, cpsStr, statusText),
+                    Duration = 10,
+                    Icon     = iconUrl or (satisfied and "check-circle" or "x-circle"),
+                })
+
                 if not satisfied then
                     KickServiceClient.Multipliers.Speed = 1e6
-
-                    for _, wave in pairs(WaveData.Waves) do
-                        wave.Speed = 9999
-                    end
 
                     pcall(function()
                         if char and char.PrimaryPart then
@@ -1305,22 +1345,19 @@ WindUI:Notify({
                     return
                 end
 
-
- KickServiceClient.Multipliers.Speed = originalLandingSpeed
+                -- SATISFIED — wait for wave/run UI
+                KickServiceClient.Multipliers.Speed = originalLandingSpeed
 if MystrixHub.FarmController.StopWaves then
     for _, wave in pairs(WaveData.Waves) do wave.Speed = 0 end
-else
-    for rarity, wave in pairs(WaveData.Waves) do wave.Speed = MystrixHub.FarmController.OriginalWaveSpeeds[rarity] or 0 end
 end
 
                 local hud = LocalPlayer.PlayerGui:FindFirstChild("HUD")
                     or LocalPlayer.PlayerGui:WaitForChild("HUD")
                 local runGui = hud:WaitForChild("Run")
-                repeat task.wait(0.1) until runGui.Visible
-                    or not MystrixHub.FarmController.Running
+                repeat task.wait(0.1) until runGui.Visible or not MystrixHub.FarmController.Running
                 if not MystrixHub.FarmController.Running then return end
 
-                if not MystrixHub.FarmController.CollectShards then
+                if MystrixHub.FarmController.StopWaves then
                     pcall(function()
                         for _, waveModel in ipairs(workspace.Waves:GetChildren()) do
                             waveModel:Destroy()
@@ -1365,71 +1402,86 @@ end
                 local hum = char:FindFirstChildOfClass("Humanoid")
                 local speedMult = 2
                 if hum then
-                    local walkSpeed = hum.WalkSpeed or 16
-                    speedMult = (walkSpeed + 7) / 20
+                    speedMult = (hum.WalkSpeed + 7) / 20
                 end
-
-
 if root and root.Parent then
+    if root.Position.X < -5473 then
+        local preTarget = Vector3.new(-5473, 33, root.Position.Z)
+        local preThread = task.spawn(function()
+            local preHum  = char and char:FindFirstChildOfClass("Humanoid")
+            local preSpd  = preHum and (preHum.WalkSpeed + 99) or 99
+            local preDist = (preTarget - root.Position).Magnitude
+            local preDur  = preDist / preSpd
+            if preDur <= 0 then preDur = 0.01 end
+            local preTween = TweenService:Create(root,
+                TweenInfo.new(preDur, Enum.EasingStyle.Linear),
+                { CFrame = CFrame.new(preTarget) })
+            preTween:Play()
+            preTween.Completed:Wait()
+        end)
+        while coroutine.status(preThread) ~= "dead" do
+            if not root or not root.Parent or LocalPlayer.Character ~= char then
+                task.cancel(preThread)
+                break
+            end
+            task.wait(0.1)
+        end
+        if not root or not root.Parent or LocalPlayer.Character ~= char then
+            lastPosition = nil
+            return
+        end
+        root.CFrame = CFrame.new(-5421, 13, 235)
+    end
 
-                    if root.Position.X < -4401 then
-                        local preTarget = Vector3.new(-4401, 13, root.Position.Z)
-                        local preThread = task.spawn(function()
-                            local preHum  = char and char:FindFirstChildOfClass("Humanoid")
-                            local preSpd  = preHum and (preHum.WalkSpeed + 99) or 99
-                            local preDist = (preTarget - root.Position).Magnitude
-                            local preDur  = preDist / preSpd
-                            if preDur <= 0 then preDur = 0.01 end
-                            local preTween = TweenService:Create(
-                                root,
-                                TweenInfo.new(preDur, Enum.EasingStyle.Linear),
-                                { CFrame = CFrame.new(preTarget) }
-                            )
-                            preTween:Play()
-                            preTween.Completed:Wait()
-                        end)
+    if root.Position.X < -4401 then
+        local preTarget = Vector3.new(-4401, 13, root.Position.Z)
+        local preThread = task.spawn(function()
+            local preHum  = char and char:FindFirstChildOfClass("Humanoid")
+            local preSpd  = preHum and (preHum.WalkSpeed + 99) or 99
+            local preDist = (preTarget - root.Position).Magnitude
+            local preDur  = preDist / preSpd
+            if preDur <= 0 then preDur = 0.01 end
+            local preTween = TweenService:Create(root,
+                TweenInfo.new(preDur, Enum.EasingStyle.Linear),
+                { CFrame = CFrame.new(preTarget) })
+            preTween:Play()
+            preTween.Completed:Wait()
+        end)
+        while coroutine.status(preThread) ~= "dead" do
+            if not root or not root.Parent or LocalPlayer.Character ~= char then
+                task.cancel(preThread)
+                break
+            end
+            task.wait(0.1)
+        end
+        if not root or not root.Parent or LocalPlayer.Character ~= char then
+            lastPosition = nil
+            return
+        end
+        root.CFrame = CFrame.new(-4351, -7, 230)
+    end
 
-                        while coroutine.status(preThread) ~= "dead" do
-                            if not root or not root.Parent or (LocalPlayer.Character ~= char) then
-                                task.cancel(preThread)
-                                break
-                            end
-                            task.wait(0.1)
-                        end
+    local flyThread = task.spawn(function()
+        MystrixHub.FarmController.FlyPath(root, speedMult)
+    end)
+    while coroutine.status(flyThread) ~= "dead" do
+        if not root or not root.Parent or LocalPlayer.Character ~= char then
+            task.cancel(flyThread)
+            break
+        end
+        task.wait(0.1)
+    end
+end
 
-                        if not root or not root.Parent or LocalPlayer.Character ~= char then
-                            lastPosition = nil
-                            return
-                        end
+char = LocalPlayer.Character
+if not char or char ~= root.Parent then
+    lastPosition = nil
+    return
+end
+root = char:WaitForChild("HumanoidRootPart", 10)
+if not root then return end
 
-                        root.CFrame = CFrame.new(-4351, -7, 230)
-                    end
-
-                    local flyThread = task.spawn(function()
-                        MystrixHub.FarmController.FlyPath(root, speedMult)
-                    end)
-
-                    while coroutine.status(flyThread) ~= "dead" do
-                        if not root or not root.Parent or (LocalPlayer.Character ~= char) then
-                            task.cancel(flyThread)
-                            break
-                        end
-                        task.wait(0.1)
-                    end
-
-                    char = LocalPlayer.Character
-
-                    if not char or char ~= root.Parent then
-                        lastPosition = nil
-                        return
-                    end
-
-                    root = char:WaitForChild("HumanoidRootPart", 10)
-                    if not root then return end
-
-                end
-
-                task.wait(1)
+                task.wait()
 
                 if MystrixHub.FarmController.KickCollectRemote and MystrixHub.FarmController.OriginalKickCollect then
                     pcall(function()
@@ -1454,10 +1506,7 @@ if root and root.Parent then
                     char = LocalPlayer.Character
                     local cur = getTools()
                     for tool in pairs(cur) do
-                        if not old[tool] then
-                            newTool = tool
-                            break
-                        end
+                        if not old[tool] then newTool = tool break end
                     end
                 until newTool or waitTime >= 15 or not MystrixHub.FarmController.Running
 
@@ -1465,17 +1514,18 @@ if root and root.Parent then
                     task.spawn(function()
                         task.wait(1)
                         local toolName = newTool.Name or "Unknown"
-                        local rarity   = MystrixHub.Functions.GetRarityOfBrainrot(toolName)
-                        local mutation = newTool:GetAttribute("Mutation")
+                        local rarity2  = MystrixHub.Functions.GetRarityOfBrainrot(toolName)
+                        local mut2     = newTool:GetAttribute("Mutation")
                             or newTool:GetAttribute("MutationType")
-                            or newTool:GetAttribute("Mut")
-                            or "None"
-                        if not rarity then return end
-                        local rarityOk   = (#MystrixHub.WebhookController.SelectedRarities == 0) or table.find(MystrixHub.WebhookController.SelectedRarities, rarity)
-                        local specificOk = (#MystrixHub.WebhookController.SelectedSpecific == 0) or table.find(MystrixHub.WebhookController.SelectedSpecific, toolName)
+                            or newTool:GetAttribute("Mut") or "None"
+                        if not rarity2 then return end
+                        local rarityOk   = (#MystrixHub.WebhookController.SelectedRarities == 0)
+                            or table.find(MystrixHub.WebhookController.SelectedRarities, rarity2)
+                        local specificOk = (#MystrixHub.WebhookController.SelectedSpecific == 0)
+                            or table.find(MystrixHub.WebhookController.SelectedSpecific, toolName)
                         local mutationOk = false
                         for _, m in ipairs(MystrixHub.WebhookController.SelectedMutations) do
-                            if m == "Any" or m == mutation then mutationOk = true break end
+                            if m == "Any" or m == mut2 then mutationOk = true break end
                         end
                         if rarityOk and specificOk and mutationOk then
                             local color = ({
@@ -1483,11 +1533,10 @@ if root and root.Parent then
                                 Legendary=0xFFD043,Mythic=0xFF00FF,Godly=0xFF00FF,
                                 Secret=0xFF0000,OG=0xFFA500,Hacked=0x00FF00,
                                 Divine=0xFFFF00,Celestial=0xFF96FF,Exclusive=0xFF0000,
-                            })[rarity] or 0x6c63ff
-                            local desc = "**Rarity:** " .. rarity
-                                .. "\n**Name:** " .. toolName
-                                .. "\n**Mutation:** " .. mutation
-                            MystrixHub.Functions.SendWebhook("Brainrot Collected", desc, color)
+                            })[rarity2] or 0x6c63ff
+                            MystrixHub.Functions.SendWebhook("Brainrot Collected",
+                                "**Rarity:** " .. rarity2 .. "\n**Name:** " .. toolName .. "\n**Mutation:** " .. mut2,
+                                color)
                         end
                     end)
                 end
@@ -1497,59 +1546,52 @@ if root and root.Parent then
                     task.spawn(function()
                         task.wait(0.5)
                         local toolName = newTool.Name or "Unknown"
-                        local rarity   = MystrixHub.Functions.GetRarityOfBrainrot(toolName)
-                        if rarity ~= "Celestial" and rarity ~= "Eternal" then return end
-                        local mutation = newTool:GetAttribute("Mutation")
-                                      or newTool:GetAttribute("MutationType")
-                                      or newTool:GetAttribute("Mut")
-                                      or "None"
-                        local rawName   = LocalPlayer.Name
+                        local rarity2  = MystrixHub.Functions.GetRarityOfBrainrot(toolName)
+                        if rarity2 ~= "Celestial" and rarity2 ~= "Eternal" then return end
+                        local mut2 = newTool:GetAttribute("Mutation")
+                            or newTool:GetAttribute("MutationType")
+                            or newTool:GetAttribute("Mut") or "None"
+                        local rawName    = LocalPlayer.Name
                         local hiddenName = #rawName <= 3 and rawName or rawName:sub(1, 3) .. "___"
-                        local brainrotText = "[" .. mutation .. "] " .. toolName
+                        local brainrotText = "[" .. mut2 .. "] " .. toolName
                         local thumbnailUrl = ""
                         pcall(function()
                             local iconRaw = MystrixHub.Functions.GetBrainrotIcon(toolName) or ""
                             local assetId = iconRaw:match("rbxassetid://(%d+)") or iconRaw:match("^(%d+)$")
                             if assetId then
                                 local resp = MystrixHub.Functions.MakeRawRequest(
-                                    "https://thumbnails.roblox.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false",
-                                    "GET", {["Accept"] = "application/json"}, nil
-                                )
+                                    "https://thumbnails.roblox.com/v1/assets?assetIds="..assetId.."&size=420x420&format=Png&isCircular=false",
+                                    "GET", {["Accept"]="application/json"}, nil)
                                 if resp and resp.Body then
-                                    local ok, data = pcall(function() return HttpService:JSONDecode(resp.Body) end)
-                                    if ok and data and data.data and data.data[1] and data.data[1].imageUrl then
-                                        thumbnailUrl = data.data[1].imageUrl
+                                    local ok2, data2 = pcall(function() return HttpService:JSONDecode(resp.Body) end)
+                                    if ok2 and data2 and data2.data and data2.data[1] then
+                                        thumbnailUrl = data2.data[1].imageUrl or ""
                                     end
                                 end
                             end
                         end)
-
-                        local now = os.date("*t")
+                        local now    = os.date("*t")
                         local hour12 = now.hour % 12
                         if hour12 == 0 then hour12 = 12 end
                         local ampm = now.hour >= 12 and "PM" or "AM"
-                        local footerText = string.format("🪐 Powered by Mystrix Hub | Version " .. MystrixHub.Meta.Version .. " • Today at %02d:%02d %s", hour12, now.min, ampm)
+                        local footerText = string.format("🪐 Powered by Mystrix Hub | Version "..MystrixHub.Meta.Version.." • Today at %02d:%02d %s", hour12, now.min, ampm)
                         local embed = {
                             ["title"]  = "Kick A Lucky Block",
                             ["color"]  = 6684927,
                             ["fields"] = {
-                                { ["name"] = "Player",   ["value"] = "```" .. hiddenName .. "```", ["inline"] = false },
-                                { ["name"] = "Time",     ["value"] = "<t:" .. collectionTime .. ":R>", ["inline"] = false },
-                                { ["name"] = "Brainrot", ["value"] = "```" .. brainrotText .. "```", ["inline"] = false },
+                                { ["name"]="Player",   ["value"]="```"..hiddenName.."```",    ["inline"]=false },
+                                { ["name"]="Time",     ["value"]="<t:"..collectionTime..":R>",["inline"]=false },
+                                { ["name"]="Brainrot", ["value"]="```"..brainrotText.."```",  ["inline"]=false },
                             },
                             ["image"]     = { ["url"] = "https://cdn.discordapp.com/attachments/1500251530379657279/1502008581149692095/ezgif.com-video-to-gif-converter.gif?ex=69fe25ff&is=69fcd47f&hm=7202c41b006a83e660b138c3c22469e1619919b639905163c00080a43ca13d8e&" },
                             ["thumbnail"] = { ["url"] = thumbnailUrl },
                             ["footer"]    = { ["text"] = footerText },
                         }
-                        local payload = { ["content"] = "", ["embeds"] = {embed} }
+                        local payload = { ["content"]="", ["embeds"]={embed} }
                         local body = game:GetService("HttpService"):JSONEncode(payload)
                         pcall(function()
-                            request({
-                                Url     = MAIN_HUB_WEBHOOK_URL,
-                                Method  = "POST",
-                                Headers = { ["Content-Type"] = "application/json" },
-                                Body    = body,
-                            })
+                            request({ Url=MAIN_HUB_WEBHOOK_URL, Method="POST",
+                                Headers={["Content-Type"]="application/json"}, Body=body })
                         end)
                     end)
                 end
@@ -1568,6 +1610,10 @@ end
 
 function MystrixHub.FarmController.Stop()
     MystrixHub.FarmController.Running = false
+    if MystrixHub.FarmController.KickEventConnection then
+    pcall(function() MystrixHub.FarmController.KickEventConnection:Disconnect() end)
+    MystrixHub.FarmController.KickEventConnection = nil
+end
     pcall(function()
         local char = LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -1595,15 +1641,10 @@ function MystrixHub.FarmController.Stop()
         KickServiceClient.Multipliers.Speed = 1
     end)
 
-    if MystrixHub.FarmController.StopWaves then
-        for _, wave in pairs(WaveData.Waves) do
-            wave.Speed = 0
-        end
-    else
-        for rarity, wave in pairs(WaveData.Waves) do
-            wave.Speed = MystrixHub.FarmController.OriginalWaveSpeeds[rarity] or 0
-        end
-    end
+for rarity, wave in pairs(WaveData.Waves) do
+    local orig = MystrixHub.FarmController.OriginalWaveSpeeds[rarity]
+    if orig and orig > 0 then wave.Speed = orig end
+end
     pcall(function()
         LocalPlayer.PlayerGui.HUD.KickButton.Visible = true
     end)
@@ -2134,7 +2175,6 @@ function MystrixHub.Functions.SyncDropdownsToState()
         MystrixHub.UIController.CurrentTheme = D.Theme.Value
     end
 
-    -- Advanced Filters (restore from dropdown values to entry tables)
     if MystrixHub.UIController.Drops.AdvancedFilters then
         for idx, drops in pairs(MystrixHub.UIController.Drops.AdvancedFilters) do
             local entry = MystrixHub.AdvancedFiltersController.Filters[idx]
@@ -2981,12 +3021,7 @@ local FavouritesSection = MystrixHub.UIController.Tabs.Brainrots:Section({
     Opened = true,
 })
 
-local favRarityList = {}
-for _, rarity in ipairs(MystrixHub.RarityOrder) do
-    if MystrixHub.RarityData[rarity] then
-        table.insert(favRarityList, rarity)
-    end
-end
+local favRarityList = MystrixHub.RarityOrder1
 
 local favSpecificList = {}
 for _, rarity in ipairs(favRarityList) do
@@ -3605,13 +3640,13 @@ local rarityPower = {
     Secret    = 3600000,
     Hacked    = 75000000,
     OG        = 250000000,
-    Celestial = 250000000,
+    Celestial = 2500000000,
 }
 
-local RARITY_ORDER = {"Common","Rare","Epic","Legendary","Mythic","Godly","Secret","Hacked","OG","Celestial","Eternal"}
+local RARITY_ORDER = {"Common","Rare","Epic","Legendary","Mythic","Godly","Secret","Hacked","OG","Celestial","Eternal","Abyssal"}
 
 local function getSliderPercentForRarity(rarity)
-    if rarity == "Celestial" or rarity == "Eternal" then return 1 end
+    if rarity == "Eternal" or rarity == "Abyssal" then return 1 end
     local KickSvc = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.KickServiceClient)
     local level = KickSvc.Level or 1
     local directRarities = {Common=true,Rare=true,Epic=true,Legendary=true,Mythic=true,Hacked=true}
@@ -3638,10 +3673,11 @@ local autoKickRarityPower = {
     OG        = 250000000,
     Celestial = 2000000000,
     Eternal   = 11000000000,
+    Abyssal   = 30000000000,
 }
 
 local autoKickRarityOrderHighToLow = {
-    "Eternal","Celestial","OG","Hacked","Divine",
+    "Abyssal" ,"Eternal","Celestial","OG","Hacked","Divine",
     "Secret","Godly","Mythic","Legendary","Epic","Rare","Common"
 }
 
@@ -3664,14 +3700,20 @@ MystrixHub.WeatherMachineController.Start = function()
         MystrixHub.WeatherMachineController.StartedFarm = true
     end
     MystrixHub.WeatherMachineController.Loop = task.spawn(function()
-        local ok, SacrificeData = pcall(function()
-            return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
-        end)
-        if not ok or not SacrificeData then
-            WindUI:Notify({ Title = "Weather Machine", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
-            MystrixHub.WeatherMachineController.Running = false
-            return
-        end
+local SacrificeData = MystrixHub.SacrificeData
+if not SacrificeData then
+    local ok
+    ok, SacrificeData = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+    end)
+    if ok and SacrificeData then
+        MystrixHub.SacrificeData = SacrificeData
+    else
+        WindUI:Notify({ Title = "Weather Machine", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
+        MystrixHub.WeatherMachineController.Running = false
+        return
+    end
+end
         local recipe = SacrificeData.Recipes[event]
         if not recipe or #recipe == 0 then
             WindUI:Notify({ Title = "Weather Machine", Content = event .. " has no recipe data.", Duration = 3, Icon = "alert-circle" })
@@ -3787,7 +3829,13 @@ MystrixHub.ActivateEventsController.Start = function()
         task.cancel(MystrixHub.ActivateEventsController.Loop)
     end
     local SacrificeData
-    pcall(function() SacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData) end)
+    local SacrificeData = MystrixHub.SacrificeData
+if not SacrificeData then
+    pcall(function()
+        SacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+        if SacrificeData then MystrixHub.SacrificeData = SacrificeData end
+    end)
+end
     MystrixHub.ActivateEventsController.AutoActivate = true
     MystrixHub.ActivateEventsController.Loop = task.spawn(function()
         while MystrixHub.ActivateEventsController.AutoActivate do
@@ -3829,8 +3877,6 @@ MystrixHub.ActivateEventsController.Stop = function()
         MystrixHub.ActivateEventsController.Loop = nil
     end
 end
-local WeatherService = require(game:GetService("ReplicatedStorage").Modules.ServicesLoader.WeatherService_Client)
-
 
 local KickSection = MystrixHub.UIController.Tabs.AutoFarm:Section({ Title = "Kick Power", Icon = "sfsymbols:figureKickboxing", Box = true, Opened = true })
 KickSection:Toggle({
@@ -3881,7 +3927,7 @@ KickSection:Toggle({
 })
 local BrainrotSection = MystrixHub.UIController.Tabs.AutoFarm:Section({ Title = "Brainrot", Icon = "sfsymbols:teddybear", Box = true, Opened = true })
 
-local farmRarityOrder    = {"Eternal","Celestial","OG","Hacked","Divine","Secret","Godly","Mythic","Legendary","Epic","Rare","Common"}
+local farmRarityOrder    = MystrixHub.RarityOrder1  
 local specificFarmValues = {}
 for _, rarity in ipairs(farmRarityOrder) do
     local names = MystrixHub.RarityData[rarity]
@@ -4040,16 +4086,24 @@ Row2:VStack():Toggle({
     Title    = "Stop Waves",
     Value    = false,
     Flag     = "afStopWaves",
-    Callback = function(state)
-        MystrixHub.FarmController.StopWaves = state
+Callback = function(state)
+    MystrixHub.FarmController.StopWaves = state
+    if state then
+        -- Snapshot current speeds before zeroing (so they're actually non-zero)
         for rarity, wave in pairs(WaveData.Waves) do
-            if state then
-                wave.Speed = 0
-            else
-                wave.Speed = MystrixHub.FarmController.OriginalWaveSpeeds[rarity] or 0
+            if wave.Speed > 0 then
+                MystrixHub.FarmController.OriginalWaveSpeeds[rarity] = wave.Speed
             end
+            wave.Speed = 0
         end
-    end,
+    else
+        -- Restore only if we have real captured values
+        for rarity, wave in pairs(WaveData.Waves) do
+            local orig = MystrixHub.FarmController.OriginalWaveSpeeds[rarity]
+            if orig and orig > 0 then wave.Speed = orig end
+        end
+    end
+end,
 })
 Row2:VStack():Toggle({
     Title    = "Auto Farm",
@@ -4067,10 +4121,7 @@ MystrixHub.AdvancedFiltersController = {
     TopDivider  = nil,
 }
 
-local advRarityOrder = {
-    "Eternal","Celestial","OG","Hacked","Divine",
-    "Secret","Godly","Mythic","Legendary","Epic","Rare","Common"
-}
+local advRarityOrder = MystrixHub.RarityOrder1
 
 local advBrainrotList = {}
 for _, rarity in ipairs(advRarityOrder) do
@@ -4152,7 +4203,8 @@ end
     AddAdvancedFilterPair()
 do
     local _orig = MystrixHub.FarmController.IsConditionMet
-    MystrixHub.FarmController.IsConditionMet = function(attr)
+MystrixHub.FarmController.IsConditionMet = function(attr)
+        
         if _orig(attr) then return true end
 
         if MystrixHub.CPSFilterController and MystrixHub.CPSFilterController.MinCPS > 0 then
@@ -4206,7 +4258,7 @@ local WeatherMachineSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.WMEvent = WeatherMachineSection:Dropdown({
     Title     = "Event",
-    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
+    Values = _WeatherEvents,
     Multi     = false,
     AllowNone = true,
     Flag      = "WMEvent",
@@ -4252,7 +4304,7 @@ local ActivateEventsSection = MystrixHub.UIController.Tabs.AutoFarm:Section({
 
 MystrixHub.UIController.Drops.ActivateEvents = ActivateEventsSection:Dropdown({
     Title     = "Activate Events",
-    Values    = {"Enchanted", "Wet", "Alien", "Heavenly"},
+    Values = _WeatherEvents,
     Multi     = true,
     AllowNone = true,
     Flag      = "AEEvents",
@@ -4270,6 +4322,9 @@ ActivateEventsSection:Toggle({
         else MystrixHub.ActivateEventsController.Stop() end
     end,
 })
+
+
+
 if MystrixHub.Meta.MemberCount == "Fetching..." then task.wait(1.5) end
 
 MystrixHub.UIController.Tabs.Home:Section({ Title = "Discord", Icon = "geist:logo-discord", Box = true, Opened = true }):Paragraph({
@@ -4315,7 +4370,7 @@ end)
 
 MystrixHub.UIController.Tabs.Home:Section({ Title = "Update", Icon = "solar:moon-fog-outline", Box = true, Opened = true }):Paragraph({
     Title   = "UPDATED — " .. MystrixHub.Meta.Version,
-    Desc    = "-> Fixed Dying On New Area\n-> New Weather Events\n-> Added All New Stuff",
+    Desc    = "-> Added All New Stuff",
     Locked  = false,
     Buttons = {}
 })
@@ -4505,17 +4560,19 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         return
     end
 
-    local ok, SacrificeData = pcall(function()
-        return require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
-    end)
-    if not ok or not SacrificeData then
+    local SacrificeData = MystrixHub.SacrificeData
+    if not SacrificeData then
+        pcall(function()
+            SacrificeData = require(game:GetService("ReplicatedStorage").Shared.Data.SacrificeData)
+            MystrixHub.SacrificeData = SacrificeData
+        end)
+    end
+    if not SacrificeData then
         WindUI:Notify({ Title = "Weather Events Webhook", Content = "Could not load recipe data.", Duration = 3, Icon = "alert-circle" })
         return
     end
 
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-
-    -- Count owned brainrots
     local ownedCounts = {}
     if backpack then
         for _, tool in ipairs(backpack:GetChildren()) do
@@ -4525,16 +4582,26 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
         end
     end
 
-    local events = {"Enchanted", "Wet", "Alien", "Heavenly"}
+    local eventNames = {}
+    if SacrificeData.Recipes then
+        for eventName, recipe in pairs(SacrificeData.Recipes) do
+            if type(recipe) == "table" and #recipe > 0 then
+                table.insert(eventNames, eventName)
+            end
+        end
+        table.sort(eventNames)
+    end
+
+    if #eventNames == 0 then
+        WindUI:Notify({ Title = "Weather Events Webhook", Content = "No event recipe data found.", Duration = 3, Icon = "alert-circle" })
+        return
+    end
 
     local CHAR_LIMIT = 4000
-    local desc = ""
-    local remaining_events = 0
-
     local eventBlocks = {}
 
-    for _, eventName in ipairs(events) do
-        local recipe = SacrificeData.Recipes and SacrificeData.Recipes[eventName]
+    for _, eventName in ipairs(eventNames) do
+        local recipe = SacrificeData.Recipes[eventName]
         if not recipe or #recipe == 0 then continue end
 
         local block = "**" .. eventName .. ":**\n"
@@ -4542,15 +4609,15 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
             if not req.Name or req.Name == "" then continue end
             local rarity = MystrixHub.Functions.GetRarityOfBrainrot(req.Name) or "Unknown"
             local owned  = ownedCounts[req.Name] or 0
-            block = block .. string.format("- **[%s] %s x%d**\n", rarity, req.Name, owned)
+            block = block .. string.format("- **[%s] %s** x%d\n", rarity, req.Name, owned)
         end
-
         table.insert(eventBlocks, block)
     end
 
-    -- Build description respecting char limit
+    local desc = ""
     local usedBlocks = {}
     local totalChars = 0
+    local remaining_events = 0
 
     for i, block in ipairs(eventBlocks) do
         local leftover   = #eventBlocks - i
@@ -4593,7 +4660,6 @@ function MystrixHub.Functions.SendWeatherEventsWebhook()
 
     local okEnc, body = pcall(HttpService.JSONEncode, HttpService, payload)
     if not okEnc or not body then return end
-
     MystrixHub.Functions.MakeRawRequest(url, "POST", { ["Content-Type"] = "application/json" }, body)
 end
 local WebhookSetup = MystrixHub.UIController.Tabs.Webhook:Section({ Title = "Setup", Icon = "link", Box = true, Opened = true })
@@ -5003,7 +5069,7 @@ end)
 
 MystrixHub.UIController.Drops.GiftRarity = SendGiftSection:Dropdown({
     Title     = "Rarity",
-    Values    = {"Eternal","Celestial","OG","Hacked","Divine","Secret","Godly","Mythic","Legendary","Epic","Rare","Common"},
+Values    = MystrixHub.RarityOrder1,
     Multi     = true,
     AllowNone = true,
     Flag      = "GiftRarity",
@@ -5023,7 +5089,7 @@ MystrixHub.UIController.Drops.GiftMutation = SendGiftSection:Dropdown({
 })
 
 local giftSpecificValues = {}
-for _, rarity in ipairs({"Eternal","Celestial","OG","Hacked","Divine","Secret","Godly","Mythic","Legendary","Epic","Rare","Common"}) do
+for _, rarity in ipairs(MystrixHub.RarityOrder1) do
     local names = MystrixHub.RarityData[rarity]
     if names then
         for _, name in ipairs(names) do
@@ -5794,15 +5860,50 @@ PerformanceSection:Toggle({
 
 
 local blackScreen = Instance.new("ScreenGui")
-blackScreen.Name = "MystrixBlackScreen"
-blackScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-blackScreen.IgnoreGuiInset = true
-blackScreen.Parent = LocalPlayer.PlayerGui
+blackScreen.Name            = "MystrixBlackScreen"
+blackScreen.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+blackScreen.IgnoreGuiInset  = true
+blackScreen.ResetOnSpawn    = false   -- KEY FIX: survives death/respawn
+blackScreen.DisplayOrder    = 9999
+blackScreen.Parent          = LocalPlayer.PlayerGui
+
 local blackFrame = Instance.new("Frame")
 blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
-blackFrame.BorderSizePixel = 0
-blackFrame.Size = UDim2.fromScale(1, 1)
-blackFrame.Parent = blackScreen
+blackFrame.BorderSizePixel  = 0
+blackFrame.Size             = UDim2.fromScale(1, 1)
+blackFrame.Parent           = blackScreen
+
+-- "MYSTRIX" neon red label
+local mystrixLabel = Instance.new("TextLabel")
+mystrixLabel.Size                  = UDim2.new(0, 500, 0, 90)
+mystrixLabel.Position              = UDim2.new(0.5, -250, 0.5, -80)
+mystrixLabel.BackgroundTransparency = 1
+mystrixLabel.Text                  = "MYSTRIX"
+mystrixLabel.TextColor3            = Color3.fromHex("#e11d48")
+mystrixLabel.TextSize              = 72
+mystrixLabel.Font                  = Enum.Font.GothamBold
+mystrixLabel.TextStrokeTransparency = 0.4
+mystrixLabel.TextStrokeColor3      = Color3.fromHex("#ff1a4a")
+mystrixLabel.Parent                = blackFrame
+
+local mystrixStroke        = Instance.new("UIStroke")
+mystrixStroke.Color        = Color3.fromHex("#ff4466")
+mystrixStroke.Thickness    = 1.5
+mystrixStroke.Transparency = 0.2
+mystrixStroke.Parent       = mystrixLabel
+
+
+local hubLabel = Instance.new("TextLabel")
+hubLabel.Size                  = UDim2.new(0, 500, 0, 55)
+hubLabel.Position              = UDim2.new(0.5, -250, 0.5, 20)
+hubLabel.BackgroundTransparency = 1
+hubLabel.Text                  = "HUB"
+hubLabel.TextColor3            = Color3.fromHex("#9ca3af")
+hubLabel.TextSize              = 40
+hubLabel.Font                  = Enum.Font.Gotham
+hubLabel.TextStrokeTransparency = 1
+hubLabel.Parent                = blackFrame
+
 blackScreen.Enabled = false
 
 PerformanceSection:Toggle({
@@ -5811,6 +5912,21 @@ PerformanceSection:Toggle({
     Flag     = "ReduceCPU",
     Callback = function(state)
         blackScreen.Enabled = state
+        pcall(function()
+            if state then
+                if setfpscap then setfpscap(25)
+                elseif setfps then setfps(25)
+                elseif syn and syn.set_fps_cap then syn.set_fps_cap(25) end
+            else
+                local capSliderVal = 240
+                pcall(function()
+                    local d = MystrixHub.UIController.Window.ConfigManager
+                end)
+                if setfpscap then setfpscap(capSliderVal)
+                elseif setfps then setfps(capSliderVal)
+                elseif syn and syn.set_fps_cap then syn.set_fps_cap(capSliderVal) end
+            end
+        end)
     end,
 })
 
